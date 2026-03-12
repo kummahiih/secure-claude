@@ -1,0 +1,16 @@
+# Security
+.secrets.env
+.cluster_tokens.env
+.env
+cluster/certs/
+certs/
+workspace/
+
+# Python
+venv/
+__pycache__/
+.pytest_cache/
+
+#aider AI chat histories
+.aider.*
+

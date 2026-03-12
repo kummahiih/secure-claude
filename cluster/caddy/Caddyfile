@@ -1,0 +1,29 @@
+{
+    admin off
+}
+
+# --- INGRESS: Access to Agent ---
+:8443 {
+    tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
+
+    reverse_proxy https://claude-server:8000 {
+        transport http {
+            tls_trusted_ca_certs /etc/caddy/certs/ca.crt
+        }
+    }
+}
+
+
+# EGRESS
+https://:8080 {
+    reverse_proxy https://host.docker.internal:443 {
+        # Use {$VAR} syntax and wrap in quotes
+        header_up Host "{$HOST_DOMAIN}"
+        transport http {
+            # This bypasses the CN/SAN check
+            tls_insecure_skip_verify 
+            tls_server_name "{$HOST_DOMAIN}"
+        }
+    }
+}
+

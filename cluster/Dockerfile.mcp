@@ -1,0 +1,41 @@
+FROM golang:1.26.1-alpine AS builder
+WORKDIR /app
+COPY fileserver/* .
+RUN go build -o mcp-server main.go
+
+# Stage 2: Certificate Signer
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Mount CA from host to sign the MCP cert
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out mcp.key 2048 && \
+    openssl req -new -key mcp.key -out mcp.csr -subj "/CN=mcp-server" && \
+    echo "subjectAltName=DNS:mcp-server,DNS:localhost,IP:127.0.0.1" > mcp.ext && \
+    openssl x509 -req -in mcp.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out mcp.crt -days 365 -sha256 -extfile mcp.ext
+
+# Stage 3: Final Image
+FROM alpine:3.23.3
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -S appuser
+
+WORKDIR /app
+COPY --from=builder /app/mcp-server .
+
+# Copy internal identity
+COPY --from=signer --chown=appuser:appgroup /certs/mcp.crt /app/certs/mcp.crt
+COPY --from=signer --chown=appuser:appgroup /certs/mcp.key /app/certs/mcp.key
+COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
+
+RUN chmod 600 /app/certs/mcp.key
+
+USER appuser
+EXPOSE 8443
+# Ensure your Go binary is configured to use these paths for its TLS config
+CMD ["./mcp-server"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "mcp-server" || exit 1

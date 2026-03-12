@@ -1,0 +1,42 @@
+# Stage 1: Certificate Signer
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Securely bind from the host context directly
+RUN --mount=type=bind,source=certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,source=certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out proxy.key 3072 && \
+    openssl req -new -key proxy.key -out proxy.csr -subj "/CN=proxy" && \
+    echo "subjectAltName=DNS:proxy,DNS:localhost,IP:127.0.0.1" > proxy.ext && \
+    openssl x509 -req -in proxy.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out proxy.crt -days 365 -sha256 -extfile proxy.ext
+
+# Stage 2: Final Proxy Image
+FROM ghcr.io/berriai/litellm:main-latest
+
+# Temporarily switch to root to update system certificates
+USER root
+
+# 1. Update the system and Python trust stores with our internal CA
+COPY certs/ca.crt /tmp/internal-ca.crt
+RUN cat /tmp/internal-ca.crt >> /etc/ssl/certs/ca-certificates.crt && \
+    cat /tmp/internal-ca.crt >> "$(python -c 'import certifi; print(certifi.where())')"
+
+# 2. Set up the Proxy's internal identity
+RUN mkdir -p /app/certs
+COPY --from=signer /certs/proxy.crt /app/certs/proxy.crt
+COPY --from=signer /certs/proxy.key /app/certs/proxy.key
+COPY certs/ca.crt /app/certs/ca.crt
+
+# Ensure the LiteLLM non-root user owns the certs
+RUN chown -R 1000:1000 /app/certs && chmod 600 /app/certs/proxy.key
+
+# Switch back to the secure user
+USER 1000:1000
+
+EXPOSE 4000
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "python" || exit 1

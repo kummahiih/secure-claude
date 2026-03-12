@@ -1,0 +1,25 @@
+model_list:
+  # expose an gemini model
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+  # Expose an OpenAI model
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # Expose an Anthropic model (LiteLLM automatically translates the API format)
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+  
+  - model_name: qwen-coder
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:14b
+      api_base: https://caddy-sidecar:8080/ollama
+      # Use the "os.environ/" prefix to be 100% sure it pulls the container env
+      api_key: "os.environ/OLLAMA_API_KEY"
+      ssl_verify: false

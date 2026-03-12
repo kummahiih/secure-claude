@@ -1,0 +1,4 @@
+certifi
+fastapi
+uvicorn
+pydantic

@@ -1,0 +1,70 @@
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Securely mount the CA key from the host to sign the agent's unique cert
+
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out agent.key 3072 && \
+    openssl req -new -key agent.key -out agent.csr -subj "/CN=claude-server" && \
+    echo "subjectAltName=DNS:localhost,DNS:claude-server,IP:127.0.0.1" > agent.ext && \
+    openssl x509 -req -in agent.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out agent.crt -days 365 -sha256 -extfile agent.ext
+
+FROM python:3.12-slim
+
+# Prevent Python from writing pyc files to disk and ensure logs are output instantly
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 2. Switch to root temporarily to perform the system-level installation
+USER root
+
+
+
+# Create the non-root user and group (UID 1000)
+RUN addgroup --gid 1000 appgroup && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the requirements file into the container
+COPY claude/requirements.txt /tmp/requirements.txt
+
+# Install dependencies from the file
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Copy Certificates from the Signer stage
+# We take the leaf cert, the leaf key, and the public CA cert
+COPY --from=signer /certs/agent.crt /app/certs/agent.crt
+COPY --from=signer /certs/agent.key /app/certs/agent.key
+COPY ./certs/ca.crt /app/certs/ca.crt
+
+# Trust the CA at the system and Python level
+RUN cat /app/certs/ca.crt >> "$(python -c 'import certifi; print(certifi.where())')" && \
+    cp /app/certs/ca.crt /usr/local/share/ca-certificates/internal-ca.crt && \
+    update-ca-certificates
+
+# Set permissions
+RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
+
+# Copy the server script and enforce correct ownership
+COPY --chown=appuser:appgroup claude/*.py .
+
+COPY --chown=appuser:appgroup claude/.claude.json /app/.claude.json
+RUN chmod 444 /app/.claude.json
+
+# Explicitly switch to the non-root user before running any code
+USER appuser
+
+# Expose the port that the Caddy sidecar will route traffic to
+EXPOSE 8000
+
+# Launch the server
+CMD ["python", "server.py"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "python" || exit 1

@@ -1,0 +1,81 @@
+#!/bin/bash
+set -e
+
+echo "[$(date +'%H:%M:%S')] Starting cluster initialization..."
+
+# 1. Load Secrets
+if [ -f .secrets.env ]; then
+    echo "[$(date +'%H:%M:%S')] Loading secrets from .secrets.env..."
+    # We use 'allexport' to make sure these are available for the key validation loop
+    set -a
+    source .secrets.env
+    set +a
+else
+    echo "[$(date +'%H:%M:%S')] Error: .secrets.env not found."
+    exit 1
+fi
+
+# 2. Validate Keys
+REQUIRED_KEYS=("ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "OLLAMA_API_KEY" "HOST_DOMAIN")
+for key in "${REQUIRED_KEYS[@]}"; do
+    if [ -z "${!key}" ]; then
+        echo "[$(date +'%H:%M:%S')] Error: $key is not set in .secrets.env."
+        exit 1
+    fi
+done
+
+# 3. Generate and Save Secure API Tokens
+echo "[$(date +'%H:%M:%S')] Cleaning up old token files..."
+rm -f .env .cluster_tokens.env
+
+echo "[$(date +'%H:%M:%S')] Generating fresh cluster tokens..."
+export DYNAMIC_AGENT_KEY="sk-$(openssl rand -hex 16)"
+export MCP_API_TOKEN=$(openssl rand -hex 32)
+export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
+
+# Create the standard .env file for Docker Compose
+# We append the .secrets.env content so Docker Compose has all keys in one place
+{
+    echo "DYNAMIC_AGENT_KEY=$DYNAMIC_AGENT_KEY"
+    echo "MCP_API_TOKEN=$MCP_API_TOKEN"
+    echo "CLAUDE_API_TOKEN=$CLAUDE_API_TOKEN"
+} > .env
+
+# Also keep the export-style file for query.sh compatibility
+{
+    echo "export DYNAMIC_AGENT_KEY=\"$DYNAMIC_AGENT_KEY\""
+    echo "export MCP_API_TOKEN=\"$MCP_API_TOKEN\""
+    echo "export CLAUDE_API_TOKEN=\"$CLAUDE_API_TOKEN\""
+} > .cluster_tokens.env
+
+# Ensure directories exist
+mkdir -p cluster/certs cluster/workspace
+
+# 4. Generate the Root Certificate Authority (CA)
+if [ ! -f cluster/certs/ca.crt ]; then
+    echo "[$(date +'%H:%M:%S')] Generating Root CA..."
+    openssl genrsa -out cluster/certs/ca.key 4096
+    openssl req -x509 -new -nodes -key cluster/certs/ca.key -sha256 -days 3650 \
+        -out cluster/certs/ca.crt \
+        -subj "/C=FI/ST=Uusimaa/L=Espoo/O=LocalCluster/CN=ClusterRootCA" >/dev/null 2>&1
+fi
+
+
+# 6. Prepare mounted directories
+echo "[$(date +'%H:%M:%S')] Setting strict local directory permissions..."
+
+# 750: You can do all, Group can read/enter, Others are completely blocked.
+chmod 750 cluster/certs cluster/workspace
+
+# 640: You can read/write, Group can read, Others get NOTHING.
+chmod 640 cluster/certs/*
+
+
+# --- NEW: Check for setup-only flag ---
+if [[ "$1" == "--setup-only" ]]; then
+    echo "[$(date +'%H:%M:%S')] Setup complete. Exiting due to --setup-only flag."
+    exit 0
+fi
+
+# 7. Launch the stack
+(./cluster/start-cluster.sh)

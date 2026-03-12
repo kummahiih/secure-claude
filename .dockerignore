@@ -1,0 +1,41 @@
+# --- Version Control ---
+.git
+.gitignore
+
+# --- Python ---
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Go ---
+# Ignore local binaries; they are built inside the Dockerfile
+mcp-server
+bin/
+obj/
+
+# --- Security & Secrets ---
+# Crucial: Prevent leaking tokens or private keys into the image layers
+.env
+.cluster_tokens.env
+.secrets.env
+*.pem
+*.key
+*.crt
+
+# --- Project Specific ---
+workspace/
+README.md
+*.sh
+!init_build.sh
+!run.sh
+# (The scripts are usually kept for reference but not needed inside the app containers)
+
+# --- IDE & OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

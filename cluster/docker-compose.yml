@@ -1,0 +1,113 @@
+services:
+  caddy-sidecar:
+    container_name: caddy-sidecar
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${CLUSTER_PATH}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      - HOST_DOMAIN=${HOST_DOMAIN}
+      # Tell Caddy to use /tmp for its internal files so it doesn't crash from permission errors
+      - XDG_DATA_HOME=/tmp/caddy_data
+      - XDG_CONFIG_HOME=/tmp/caddy_config
+    ports:
+      - "8443:8443"  # Ingress
+    networks:
+      - ext_net
+      - int_net
+    depends_on:
+      - claude-server
+    restart: unless-stopped
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    container_name: litellm-proxy
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      # secrets from the env
+      - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - HOST_DOMAIN=${HOST_DOMAIN}
+      # litellm env variables
+      - HOME=/tmp
+      - LITELLM_NON_ROOT=true
+      - LITELLM_MASTER_KEY=${DYNAMIC_AGENT_KEY}
+      - LITELLM_LOG=ERROR
+      # Point to the newly injected global CA bundles inside the container
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - NO_PROXY=localhost,127.0.0.1,mcp-server,claude-server
+      - HTTP_PROXY=""
+      - HTTPS_PROXY=""
+
+
+    volumes:
+      - ./proxy/proxy_config.yaml:/tmp/config.yaml:ro
+      - ./proxy/proxy_wrapper.py:/app/proxy_wrapper.py:ro
+    # Run the mock wrapper instead of the standard LiteLLM start command
+    entrypoint: ["python3", "/app/proxy_wrapper.py"]
+    networks:
+      - int_net  # For talking to claude-server (Internal)
+      - ext_net  # For talking to OpenAI/Anthropic (Outside World)
+    restart: unless-stopped
+
+  claude-server:
+    build: 
+      context: .
+      dockerfile: Dockerfile.claude
+    container_name: claude-server
+    user: "1000:1000"
+    environment:
+      - ANTHROPIC_API_KEY=${DYNAMIC_AGENT_KEY}      # was OPENAI_API_KEY
+      - ANTHROPIC_BASE_URL=https://proxy:4000        # was OPENAI_API_BASE
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
+      - MCP_SERVER_URL=https://mcp-server:8443
+      - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt        # for Node.js/Claude Code
+      - CURL_CA_BUNDLE=/app/certs/ca.crt
+      - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
+      - SSL_CERT_FILE=/app/certs/ca.crt
+    networks:
+      - int_net
+    depends_on:
+      - mcp-server
+      - proxy  # Added dependency to ensure the proxy boots first
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: mcp-server
+    user: "1000:1000"
+    environment:
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - SSL_CERT_FILE=/app/certs/ca.crt
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - int_net
+    restart: unless-stopped
+
+
+
+networks:
+  ext_net:
+    driver: bridge
+  int_net:
+    internal: true
