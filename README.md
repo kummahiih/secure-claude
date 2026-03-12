@@ -9,7 +9,7 @@ A hardened, containerized environment for AI Agents to interact with local syste
 
 ### Service Roles
 * **Caddy Sidecar**: The gateway. Handles SSL termination (TLS 1.3) and provides a secure ingress point to the internal network.
-* **LangChain Server**: The orchestrator. Runs the LangGraph/Agent logic and coordinates between the LLM and local tools.
+* **Claude Server**: The orchestrator. Runs the LangGraph/Agent logic and coordinates between the LLM and local tools.
 * **LiteLLM Proxy**: The API gateway. Provides a unified interface for LLM providers (Ollama, OpenAI, etc.) while managing egress credentials.
 * **MCP Server**: The execution layer. A secure Go service using `os.OpenRoot` to provide restricted filesystem access to the `/workspace` volume.
 
@@ -30,8 +30,8 @@ The cluster enforces an "Air-Gap" style isolation using two distinct Docker netw
 ### Internal Communication Path
 1.  **User Request**: `Host` -> `https://localhost:8443` -> `Caddy`
 2.  **Logic Processing**: `Caddy` -> `https://claude-server:8000`
-3.  **Tool Execution**: `LangChain` -> `https://mcp-server:8443/read`
-4.  **Inference**: `LangChain` -> `https://proxy:4000/v1/chat/completions`
+3.  **Tool Execution**: `Claude` -> `https://mcp-server:8443/read`
+4.  **Inference**: `Claude` -> `https://proxy:4000/v1/chat/completions`
 ---
 
 ## 🔒 Security Guardrails
@@ -44,7 +44,7 @@ The MCP server implements the new `os.OpenRoot` capability. This creates a logic
 
 ### 3. Dual-Layer Authentication
 * **Ingress Auth**: Managed by Caddy/FastAPI via `CLAUDE_API_TOKEN`.
-* **Service Auth**: The LangChain server communicates with the MCP server using a dedicated `MCP_API_TOKEN`.
+* **Service Auth**: The Claude server communicates with the MCP server using a dedicated `MCP_API_TOKEN`.
 
 ### 4. Using https everywhere
 
@@ -59,7 +59,7 @@ This project is structured into modular microservices, separating the edge routi
 ```text
 .
 ├──cluster/
-|   ├── claude/                  # Python LangChain integration and agent logic
+|   ├── claude/                  # Python Claude integration and agent logic
 │   | ├── claude_tests.py     # Unit tests for the agent and tools
 │   | └── server.py             # FastAPI server exposing the agent endpoints
 |   ├── caddy/                  # Edge router and reverse proxy

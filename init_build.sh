@@ -18,17 +18,11 @@ pip install --upgrade pip
 # 4. Install the required testing, application, and LLM provider libraries
 echo "[$(date +'%H:%M:%S')] Installing Python dependencies..."
 pip install \
-    pytest \
-    httpx \
-    fastapi \
-    uvicorn \
-    requests \
-    pydantic \
-    langchain \
-    langchain-openai \
-    langchain-anthropic \
-    langchain-google-genai \
-    langchain-community
-
+  certifi \
+  fastapi \
+  uvicorn \
+  pydantic \
+  pytest \
+  httpx
 echo "[$(date +'%H:%M:%S')] Build environment initialized successfully!"
 echo "[$(date +'%H:%M:%S')] Note: Run 'source venv/bin/activate' in your terminal before running ./test.sh"

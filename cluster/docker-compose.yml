@@ -39,9 +39,6 @@ services:
       - MCP_API_TOKEN=${MCP_API_TOKEN}
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
       - HOST_DOMAIN=${HOST_DOMAIN}
       # litellm env variables
       - HOME=/tmp
@@ -73,8 +70,8 @@ services:
     container_name: claude-server
     user: "1000:1000"
     environment:
-      - ANTHROPIC_API_KEY=${DYNAMIC_AGENT_KEY}      # was OPENAI_API_KEY
-      - ANTHROPIC_BASE_URL=https://proxy:4000        # was OPENAI_API_BASE
+      - ANTHROPIC_API_KEY=${DYNAMIC_AGENT_KEY}      
+      - ANTHROPIC_BASE_URL=https://proxy:4000        
       - MCP_API_TOKEN=${MCP_API_TOKEN}
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - MCP_SERVER_URL=https://mcp-server:8443

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "[$(date +'%H:%M:%S')] Starting automated test suite..."
 
@@ -9,10 +9,7 @@ bash ./run.sh --setup-only
 # Provide completely fake tokens so the SDKs and Docker Compose don't crash on boot
 export MCP_API_TOKEN="integration-test-mcp-token"
 export CLAUDE_API_TOKEN="integration-test-langchain-token"
-export OPENAI_API_KEY="sk-dummy-key-for-integration-tests"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
-export GEMINI_API_KEY="dummy-gemini-key"
-export OLLAMA_API_KEY="dummy-ollama-key"
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 4/6: Running Dependency Security Scans..."
@@ -55,7 +52,7 @@ echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 3/6: Running Python LangChain Tests..."
-(source ./venv/bin/activate && cd cluster/agent && pytest claude_tests.py -v)
+(source ./venv/bin/activate && cd cluster/claude && pytest claude_tests.py -v)
 
 
 echo "----------------------------------------"

@@ -42,7 +42,8 @@ def test_fastapi_endpoint_authorized_success():
             ["claude", "--print", "--model", "claude-sonnet-4-6", "What is the status?"],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
+            env={**os.environ, "CLAUDE_CONFIG_DIR": "/app"}
         )
 
 

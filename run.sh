@@ -16,7 +16,7 @@ else
 fi
 
 # 2. Validate Keys
-REQUIRED_KEYS=("ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "OLLAMA_API_KEY" "HOST_DOMAIN")
+REQUIRED_KEYS=("ANTHROPIC_API_KEY" "HOST_DOMAIN")
 for key in "${REQUIRED_KEYS[@]}"; do
     if [ -z "${!key}" ]; then
         echo "[$(date +'%H:%M:%S')] Error: $key is not set in .secrets.env."
