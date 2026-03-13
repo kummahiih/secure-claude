@@ -1,118 +1,209 @@
+# Secure Claude Code Cluster
 
-# 🛡️ Secure MCP Cluster
+A hardened, containerized environment for running Claude Code as an AI agent with access to local tools via the Model Context Protocol (MCP). Credentials are never exposed to the agent - a LiteLLM sidecar proxy holds the real API keys while the agent uses ephemeral tokens.
 
-A hardened, containerized environment for AI Agents to interact with local system tools via the Model Context Protocol (MCP). This setup utilizes a sidecar architecture to enforce TLS encryption and token-based authentication across all internal services.
+## System Architecture
 
-## 🏗️ System Architecture
-
-
+```
+Host / Network
+└─> Caddy:8443 (TLS 1.3 + Bearer auth)
+     └─> claude-server:8000 (FastAPI + Claude Code)
+          ├─> proxy:4000 (LiteLLM) ──> Anthropic API
+          └─> mcp-server:8443 (Go REST, os.OpenRoot jail)
+               └─> /workspace (bind mount)
+```
 
 ### Service Roles
-* **Caddy Sidecar**: The gateway. Handles SSL termination (TLS 1.3) and provides a secure ingress point to the internal network.
-* **Claude Server**: The orchestrator. Runs the LangGraph/Agent logic and coordinates between the LLM and local tools.
-* **LiteLLM Proxy**: The API gateway. Provides a unified interface for LLM providers (Ollama, OpenAI, etc.) while managing egress credentials.
-* **MCP Server**: The execution layer. A secure Go service using `os.OpenRoot` to provide restricted filesystem access to the `/workspace` volume.
 
----
-
-## 🔌 Network Topology
-
-The cluster enforces an "Air-Gap" style isolation using two distinct Docker networks:
-
-### 🛰️ Service Inventory
-| Service | Image | Network(s) | Ports (Exposed) | Description |
+| Service | Image | Network(s) | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`caddy-sidecar`** | `caddy:2-alpine` | `ext_net`, `int_net` | `8443:8443` | SSL Termination & External Ingress |
-| **`proxy`** | `litellm:main-latest` | `ext_net`, `int_net` | *None* | Secure Gateway to Gemini/OpenAI |
-| **`claude-server`**| `Dockerfile.claude`| `int_net` | *None* | Logic Engine (Agent) |
-| **`mcp-server`** | `Dockerfile.mcp` | `int_net` | *None* | Tool Provider (Workspace Access) |
-
-### Internal Communication Path
-1.  **User Request**: `Host` -> `https://localhost:8443` -> `Caddy`
-2.  **Logic Processing**: `Caddy` -> `https://claude-server:8000`
-3.  **Tool Execution**: `Claude` -> `https://mcp-server:8443/read`
-4.  **Inference**: `Claude` -> `https://proxy:4000/v1/chat/completions`
----
-
-## 🔒 Security Guardrails
-
-### 1. Unified Trust Chain
-All services mount a shared `./certs` volume. By setting the `SSL_CERT_FILE` environment variable, every container (Python, Go, and Caddy) trusts the internal Root CA, allowing for seamless internal HTTPS without `InsecureRequestWarning`.
-
-### 2. Filesystem Jail
-The MCP server implements the new `os.OpenRoot` capability. This creates a logical "jail" at `/workspace`. Even if an agent is prompted to perform a directory traversal attack (e.g., `../../etc/passwd`), the Go runtime will block the request at the system level.
-
-### 3. Dual-Layer Authentication
-* **Ingress Auth**: Managed by Caddy/FastAPI via `CLAUDE_API_TOKEN`.
-* **Service Auth**: The Claude server communicates with the MCP server using a dedicated `MCP_API_TOKEN`.
-
-### 4. Using https everywhere
-
+| caddy-sidecar | Dockerfile.caddy | ext_net, int_net | 8443 | TLS termination & external ingress |
+| claude-server | Dockerfile.claude | int_net | - | FastAPI + Claude Code agent |
+| proxy | Dockerfile.proxy | ext_net, int_net | - | LiteLLM gateway to Anthropic |
+| mcp-server | Dockerfile.mcp | int_net | - | Go filesystem tool server |
 
 ---
 
+## Security Guardrails
 
-## 📂 Project files
+### 1. Credential Isolation
+The agent container never holds real API keys. It authenticates with an ephemeral DYNAMIC_AGENT_KEY to the LiteLLM proxy, which holds the real ANTHROPIC_API_KEY in memory only.
 
-This project is structured into modular microservices, separating the edge routing, the language model agent, and the file system tools into distinct, containerized domains.
+### 2. MCP Security Proxy
+All JSON-RPC traffic between Claude Code and the MCP fileserver passes through mcp-watchdog (https://github.com/bountyyfi/mcp-watchdog), which detects and blocks prompt injection, rug pulls, tool poisoning, SSRF, command injection, token leakage, and 40+ other attack classes before they reach the model.
 
-```text
+### 3. Filesystem Jail
+The Go MCP server uses os.OpenRoot to jail all file operations to /workspace. Directory traversal attacks (e.g. ../../etc/passwd) are blocked at the Go runtime level.
+
+### 4. Network Isolation
+The agent runs on int_net only - an internal Docker bridge with no internet access. Only the LiteLLM proxy and Caddy have ext_net access for outbound API calls and inbound queries respectively.
+
+### 5. Dual-Layer Authentication
+- Ingress: Caddy + FastAPI validate AGENT_API_TOKEN on every request
+- Internal: Claude Code authenticates to the MCP server with a separate MCP_API_TOKEN
+
+### 6. TLS Everywhere
+All internal service-to-service communication uses HTTPS with a shared internal CA. No plaintext traffic on any network and server identity should be strong.
+
+### 7. Read-Only Agent Config
+Claude Code's MCP configuration is written once at container startup and locked to 440 - the agent cannot modify its own tool registrations.
+
+### 8. Non-Root Containers
+All containers run as non-root users (UID 1000). cap_drop: ALL is set on the proxy container.
+
+---
+
+## Project Structure
+
+```
 .
-├──cluster/
-|   ├── claude/                  # Python Claude integration and agent logic
-│   | ├── claude_tests.py     # Unit tests for the agent and tools
-│   | └── server.py             # FastAPI server exposing the agent endpoints
-|   ├── caddy/                  # Edge router and reverse proxy
-|   │   ├── Caddyfile           # TLS and reverse proxy configuration
-|   │   └── caddy_test.sh       # Validation script for Caddy configuration
-|   ├── fileserver/             # Golang MCP (Model Context Protocol) file server
-|   │   ├── go.mod              # Go module dependencies
-|   │   ├── main.go             # Core MCP server logic and tool handlers
-|   │   └── mcp_test.go         # Unit tests for the Go MCP handlers
-|   ├── proxy/                  # Local proxy wrappers and routing
-|   │   ├── proxy_config.yaml   # Proxy configuration rules
-|   │   └── proxy_wrapper.py    # Python wrapper for proxy execution
-|   ├── docker-compose.yml      # Orchestrates the Caddy, Agent, and MCP containers
-|   ├── Dockerfile.claude    # Container build steps for the Python agent
-|   ├── Dockerfile.mcp          # Container build steps for the Go fileserver
-|   ├── Dockerfile.caddy        # Container build steps for the sidecar Caddy
-|   ├── Dockerfile.proxy        # Container build steps for the LiteLLM Proxy
-|   └── start-cluster.sh        # starts the cluster (used by run.sh)
-├── init_build.sh           # Initial environment setup and build script
-├── query.sh                # CLI utility for sending test queries to the agent
-├── run.sh                  # Operational script (generates certs, manages lifecycle)
-├── test.sh                 # Master test suite (runs unit and integration tests)
-└── README.md               # Project intruduction
+├── cluster/
+│   ├── caddy/
+│   │   ├── Caddyfile               # TLS and reverse proxy config
+│   │   └── caddy_test.sh           # Caddy validation script
+│   ├── claude/
+│   │   ├── server.py               # FastAPI server, Claude Code subprocess
+│   │   ├── files_mcp.py            # MCP stdio server wrapping Go REST API
+│   │   ├── entrypoint.sh           # Registers MCP tools, locks config, starts server
+│   │   ├── runenv.py               # Environment variable validation
+│   │   ├── setuplogging.py         # Logging configuration
+│   │   ├── requirements.txt        # Python dependencies
+│   │   ├── claude_tests.py         # FastAPI unit tests
+│   │   └── files_mcp_test.py       # MCP tool unit tests
+│   ├── fileserver/
+│   │   ├── main.go                 # Go MCP REST server with os.OpenRoot jail
+│   │   ├── mcp_test.go             # Go unit tests
+│   │   └── go.mod                  # Go module dependencies
+│   ├── proxy/
+│   │   ├── proxy_config.yaml       # LiteLLM model routing config
+│   │   └── proxy_wrapper.py        # LiteLLM startup wrapper
+│   ├── docker-compose.yml          # Service orchestration
+│   ├── Dockerfile.caddy
+│   ├── Dockerfile.claude
+│   ├── Dockerfile.mcp
+│   ├── Dockerfile.proxy
+│   └── start-cluster.sh            # Starts all containers
+├── init_build.sh                   # Creates venv and installs test dependencies
+├── run.sh                          # Generates certs, rotates tokens, starts cluster
+├── query.sh                        # CLI utility for sending queries to the agent
+├── test.sh                         # Full test suite (unit + security + integration)
+└── logs.sh                         # Tails all container logs
 ```
 
-## 🛠️ Operational Commands
+---
 
-### Initialize and Start
-The `run.sh` script automates certificate generation, token rotation, and container orchestration:
+## Prerequisites
+
+- Docker Engine with Compose V2
+- Node.js 22+ (for claude login)
+- openssl (for certificate generation)
+- Python 3.12+ with venv (for local tests)
+
+---
+
+## Quick Start
+
+1. Clone and initialize
+
+```bash
+git clone <your-repo-url> secure-claude
+cd secure-claude
+cp .secrets.env.example .secrets.env
+```
+
+2. Add your Anthropic API key to .secrets.env
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+To use a Pro subscription OAuth token instead of a paid API key:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login
+claude setup-token
+```
+
+Copy the sk-ant-oat01-... token into .secrets.env as ANTHROPIC_API_KEY.
+
+3. Initialize local test environment
+
+```bash
+./init_build.sh
+```
+
+4. Start the cluster
+
 ```bash
 ./run.sh
-./query.sh local "Please read info.txt from my workspace."
-./query.sh remote "Please read info.txt from my workspace."
-
 ```
 
-## 🛡️ Security & Quality Auditing
+This generates internal TLS certificates, rotates all tokens, and starts all four containers.
 
-This project implements a multi-layered security approach to ensure dependencies and infrastructure are secure. We utilize industry-standard open-source tools to scan for vulnerabilities and misconfigurations.
+5. Send a query
 
-### 🔍 Security Toolset
+```bash
+./query.sh claude-sonnet-4-6 "list the files in my workspace"
+./query.sh claude-sonnet-4-6 "create a file called hello.py with a hello world function"
+./query.sh claude-sonnet-4-6 "read hello.py"
+```
 
-| Tool | Focus Area | Purpose |
+---
+
+## Operational Commands
+
+```bash
+./run.sh                          # Start cluster (generates certs + tokens on first run)
+./query.sh <model> "<query>"      # Send a query to the agent
+./logs.sh                         # Tail all container logs
+./test.sh                         # Run full test suite
+```
+
+---
+
+## Security & Quality Auditing
+
+The full test suite runs automatically with ./test.sh and covers:
+
+| Tool | Focus | Target |
 | :--- | :--- | :--- |
-| **pip-audit** | Python Libraries | Scans `claude/requirements.txt` for known CVEs. |
-| **govulncheck** | Go Modules | Analyzes Go code for reachable vulnerabilities. |
-| **hadolint** | Dockerfiles | Lints `Dockerfile.*` for security best practices. |
-| **trivy** | Infrastructure | Scans `docker-compose.yml` and images for leaks. |
-
-
-### 🚀 Running the Full Test Suite
-To run the full suite (auditing Python, Go, and Docker configurations), execute:
+| pytest | Unit tests | claude/ Python server and MCP tools |
+| go test | Unit tests | fileserver/ Go MCP server |
+| pip-audit | CVE scanning | claude/requirements.txt |
+| govulncheck | CVE scanning | fileserver/ Go modules |
+| hadolint | Dockerfile linting | All Dockerfile.* |
+| trivy | Misconfiguration | docker-compose.yml + images |
 
 ```bash
 ./test.sh
 ```
+
+---
+
+## Adding Workspace Files
+
+Mount your project directory into the workspace before starting:
+
+```bash
+mkdir -p cluster/workspace
+sudo mount --bind /your/project cluster/workspace
+./run.sh
+```
+
+Or edit docker-compose.yml to point the mcp-server workspace volume at your project:
+
+```yaml
+volumes:
+  - /your/project:/workspace
+```
+
+---
+
+## Credits
+
+Architecture inspired by secure-coder (https://github.com/kummahiih/secure-coder) and secure-mcp (https://github.com/kummahiih/secure-mcp).
+
+MCP security provided by mcp-watchdog (https://github.com/bountyyfi/mcp-watchdog) by Bountyy Oy.
+
+Some of the code was produced using Google Gemin, some of it was done using Claude
