@@ -21,7 +21,7 @@ fi
 MODEL=$1
 QUERY=$2
 
-echo "[$(date +'%H:%M:%S')] Sending query to secure LangChain agent..."
+echo "[$(date +'%H:%M:%S')] Sending query to secure Claude agent..."
 
 # 4. Execute the authenticated request
 curl -s -X POST https://localhost:8443/ask \

@@ -2,3 +2,4 @@ certifi
 fastapi
 uvicorn
 pydantic
+requests

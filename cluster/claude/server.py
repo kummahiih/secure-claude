@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import secrets
 import subprocess
@@ -6,7 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import setuplogging
-from runenv import CLAUDE_API_TOKEN
+from runenv import CLAUDE_API_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class QueryRequest(BaseModel):
     model: str  # kept for API compatibility, passed as --model to claude
 
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -43,24 +45,42 @@ async def health_check():
 @app.post("/ask")
 async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     """External endpoint routed through Caddy, secured with Bearer token."""
-    logger.info(f"Received authenticated query: {request.query}")
+    logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
     try:
         result = subprocess.run(
-            ["claude", "--print", "--model", request.model, request.query],
+            [
+                "claude", "--print",
+                "--add-dir", "/workspace",
+                "--output-format", "json",
+                "--model", request.model, request.query],
+            cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
             timeout=120,
             env={
                 **os.environ,
-                "CLAUDE_CONFIG_DIR": "/app",
+                "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
+                "HOME": "/home/appuser",
             }
         )
+
+        logger.info(f"stdout: {result.stdout!r}")
+        logger.info(f"stderr: {result.stderr!r}")
+        logger.info(f"returncode: {result.returncode}")
+        logger.info(f"result: {result!r}")
 
         if result.returncode != 0:
             logger.error(f"Claude Code exited with error: {result.stderr}")
             return {"error": result.stderr}
 
-        return {"response": result.stdout.strip()}
+        try:
+            parsed = json.loads(result.stdout)
+            if parsed.get("is_error"):
+                return {"error": parsed.get("result", "Unknown error")}
+            return {"response": parsed.get("result", "")}
+        except json.JSONDecodeError:
+            # fallback in case output is plain text
+            return {"response": result.stdout.strip()}
 
     except subprocess.TimeoutExpired:
         logger.error("Claude Code timed out.")

@@ -1,3 +1,7 @@
+#!/bin/bash
+set -e
+
+cat > /home/appuser/.claude.json << EOF
 {
   "mcpServers": {
     "secure-fileserver": {
@@ -9,3 +13,9 @@
     }
   }
 }
+EOF
+
+# Lock home directory so nothing else can be written after this point
+chmod 550 /home/appuser
+
+exec python /app/server.py

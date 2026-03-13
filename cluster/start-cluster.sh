@@ -3,9 +3,7 @@ set -e
 
 # 1. Force the context to the directory where this script is located
 cd "$(dirname "$0")"
-export CLUSTER_PATH=$(pwd)
 
-echo "CLUSTER_PATH=$CLUSTER_PATH"
 # 3. Docker Execution
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1

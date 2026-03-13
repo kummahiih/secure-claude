@@ -8,7 +8,7 @@ bash ./run.sh --setup-only
 
 # Provide completely fake tokens so the SDKs and Docker Compose don't crash on boot
 export MCP_API_TOKEN="integration-test-mcp-token"
-export CLAUDE_API_TOKEN="integration-test-langchain-token"
+export CLAUDE_API_TOKEN="integration-test-Claude-token"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
 
 echo "----------------------------------------"
@@ -51,7 +51,7 @@ echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
 (cd cluster/fileserver && go test mcp_test.go main.go -v)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/6: Running Python LangChain Tests..."
+echo "[$(date +'%H:%M:%S')] 3/6: Running Python Claude Tests..."
 (source ./venv/bin/activate && cd cluster/claude && pytest claude_tests.py -v)
 
 

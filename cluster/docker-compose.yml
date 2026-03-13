@@ -7,7 +7,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${CLUSTER_PATH}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     environment:
       - HOST_DOMAIN=${HOST_DOMAIN}
       # Tell Caddy to use /tmp for its internal files so it doesn't crash from permission errors

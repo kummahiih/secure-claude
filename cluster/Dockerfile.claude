@@ -37,6 +37,23 @@ COPY claude/requirements.txt /tmp/requirements.txt
 # Install dependencies from the file
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl=8.14.1-2+deb13u2 \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs=22.22.1-1nodesource1 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @anthropic-ai/claude-code@2.1.74
+
+RUN mkdir -p /home/appuser/.claude && \
+    chown -R appuser:appgroup /home/appuser
+
+RUN mkdir -p /home/appuser/sandbox && \
+    chown appuser:appgroup /home/appuser/sandbox && \
+    chmod 500 /home/appuser/sandbox  # read+execute only, nothing can be created in it
+
 # Copy Certificates from the Signer stage
 # We take the leaf cert, the leaf key, and the public CA cert
 COPY --from=signer /certs/agent.crt /app/certs/agent.crt
@@ -53,18 +70,23 @@ RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 
 # Copy the server script and enforce correct ownership
 COPY --chown=appuser:appgroup claude/*.py .
+COPY --chown=appuser:appgroup claude/entrypoint.sh /app/entrypoint.sh
 
-COPY --chown=appuser:appgroup claude/.claude.json /app/.claude.json
-RUN chmod 444 /app/.claude.json
+# Lock down /app - readable but not writable by appuser
+RUN chmod -R 550 /app && \
+    chmod 440 /app/certs/ca.crt && \
+    chmod 400 /app/certs/agent.key && \
+    chown -R appuser:appgroup /app
 
 # Explicitly switch to the non-root user before running any code
 USER appuser
+
 
 # Expose the port that the Caddy sidecar will route traffic to
 EXPOSE 8000
 
 # Launch the server
-CMD ["python", "server.py"]
+CMD ["/app/entrypoint.sh"]
 
 HEALTHCHECK --interval=1m --timeout=5s \
   CMD pgrep -f "python" || exit 1
