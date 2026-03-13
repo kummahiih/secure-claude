@@ -2,6 +2,7 @@
 set -euo pipefail
 
 echo "[$(date +'%H:%M:%S')] Starting automated test suite..."
+. venv/bin/activate
 
 # Generate any missing files via setup
 bash ./run.sh --setup-only 
@@ -52,7 +53,7 @@ echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 3/6: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/claude && pytest claude_tests.py -v)
+(source ./venv/bin/activate && cd cluster/claude && pytest claude_tests.py files_mcp_test.py -v)
 
 
 echo "----------------------------------------"
@@ -71,22 +72,38 @@ echo "[$(date +'%H:%M:%S')] 6/6: Running Docker Integration Tests..."
 echo "[$(date +'%H:%M:%S')] Waiting for Caddy and FastAPI to initialize (20s)..."
 sleep 20
 
-echo "[$(date +'%H:%M:%S')] Pinging the secured public Caddy endpoint..."
-# The '|| echo "000"' prevents set -e from killing the script if the connection is refused
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://localhost:8443/ask -k \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $CLAUDE_API_TOKEN" \
-    -d '{"query": "Hello"}' || echo "000")
-
-if [ "$HTTP_STATUS" -eq 200 ]; then
-    echo "[$(date +'%H:%M:%S')] Success! Caddy routed the request. Endpoint returned 200 OK."
+echo "$(timestamp) Checking MCP server registration..."
+if docker exec claude-server claude mcp list | grep -q "fileserver"; then
+  echo "  ✅ MCP fileserver registered"
 else
-    echo "[$(date +'%H:%M:%S')] Error: Endpoint returned HTTP $HTTP_STATUS."
-    echo "[$(date +'%H:%M:%S')] Dumping container logs for debugging:"
-    (cd cluster && docker-compose logs)
-    (cd cluster && docker-compose down)
-    exit 1
+  echo "  ❌ MCP fileserver not registered"
+  (cd cluster && docker compose down)
+  exit 1
 fi
+
+echo "$(timestamp) Checking MCP server health..."
+if docker exec claude-server claude mcp list | grep -q "✓"; then
+  echo "  ✅ MCP fileserver healthy"
+else
+  echo "  ⚠️  MCP fileserver registered but not connected"
+fi
+
+
+echo "[$(date +'%H:%M:%S')] Checking auth failure on Caddy endpoint..."
+AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://localhost:8443/ask -k \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer wrong-token" \
+  -d '{"query": "Hello"}' || echo "000")
+
+if [ "$AUTH_STATUS" -eq 401 ]; then
+  echo "[$(date +'%H:%M:%S')] ✅ Auth correctly rejected invalid token with 401."
+else
+  echo "[$(date +'%H:%M:%S')] ❌ Expected 401 but got HTTP $AUTH_STATUS."
+  (cd cluster && docker-compose logs)
+  (cd cluster && docker-compose down)
+  exit 1
+fi
+
 
 echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down)

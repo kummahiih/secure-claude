@@ -39,11 +39,22 @@ def test_fastapi_endpoint_authorized_success():
         json_response = response.json()
         assert json_response["response"] == "Here is the status."
         mock_run.assert_called_once_with(
-            ["claude", "--print", "--model", "claude-sonnet-4-6", "What is the status?"],
+            [
+                "claude", "--print",
+                "--dangerously-skip-permissions",
+                "--output-format", "json",
+                "--model", request.model,
+                "--system-prompt", "You have access to a workspace through MCP fileserver tools. Always use MCP tools to read, write, list and delete files. Never access the local filesystem directly.",
+                request.query],
+            cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
             timeout=120,
-            env={**os.environ, "CLAUDE_CONFIG_DIR": "/app"}
+            env={
+                **os.environ,
+                "CLAUDE_CONFIG_DIR": "/home/appuser",
+                "HOME": "/home/appuser",
+            }
         )
 
 

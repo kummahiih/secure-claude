@@ -50,16 +50,18 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
         result = subprocess.run(
             [
                 "claude", "--print",
-                "--add-dir", "/workspace",
+                "--dangerously-skip-permissions",
                 "--output-format", "json",
-                "--model", request.model, request.query],
+                "--model", request.model,
+                "--system-prompt", "You have access to a workspace through MCP fileserver tools. Always use MCP tools to read, write, list and delete files. Never access the local filesystem directly.",
+                request.query],
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
             timeout=120,
             env={
                 **os.environ,
-                "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
+                "CLAUDE_CONFIG_DIR": "/home/appuser",
                 "HOME": "/home/appuser",
             }
         )

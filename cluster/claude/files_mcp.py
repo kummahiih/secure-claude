@@ -4,8 +4,12 @@ import json
 import setuplogging
 from runenv import MCP_SERVER_URL, MCP_API_TOKEN
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
 from mcp import types
+from mcp.types import CallToolResult, TextContent
+
+import asyncio
+from mcp.server.stdio import stdio_server
+from mcp.server import NotificationOptions
 
 logger = logging.getLogger(__name__)
 
@@ -73,31 +77,39 @@ async def list_tools() -> list[types.Tool]:
     ]
 
 
+
+
 @server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def call_tool(name: str, arguments: dict) -> CallToolResult:
     try:
         result = await _dispatch(name, arguments)
+        return CallToolResult(
+            content=[TextContent(type="text", text=result)],
+            isError=False
+        )
     except Exception as e:
-        logger.error(f"Tool {name} failed: {e}")
-        result = f"Error: {str(e)}"
-    return [types.TextContent(type="text", text=result)]
+        logger.error(f"Tool {name} error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=str(e))],
+            isError=True
+        )
+
 
 
 async def _dispatch(name: str, arguments: dict) -> str:
     if name == "read_workspace_file":
-        file_path = arguments["file_path"]
         response = requests.get(
-            f"{MCP_SERVER_URL}/read?path={file_path}",
+            f"{MCP_SERVER_URL}/read?path={arguments['file_path']}",
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
             return response.text
         elif response.status_code == 401:
-            return "Error: Unauthorized. Token mismatch."
+            raise PermissionError("Unauthorized. Token mismatch.")
         elif response.status_code == 404:
-            return "Error: File not found or access denied by OS jail."
+            raise FileNotFoundError("File not found or access denied by OS jail.")
         else:
-            return f"Error: Server returned status {response.status_code}"
+            raise RuntimeError(f"Server returned status {response.status_code}")
 
     elif name == "list_files":
         response = requests.get(
@@ -108,14 +120,17 @@ async def _dispatch(name: str, arguments: dict) -> str:
             files = response.json().get("files", [])
             return json.dumps({"files": files, "count": len(files)})
         else:
-            return json.dumps({"error": f"HTTP {response.status_code}", "detail": response.text})
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
     elif name == "create_file":
         response = requests.post(
             f"{MCP_SERVER_URL}/create?path={arguments['path']}",
             headers=HEADERS, verify=VERIFY, timeout=10
         )
-        return "File created" if response.status_code == 201 else f"Error: {response.text}"
+        if response.status_code == 201:
+            return "File created"
+        else:
+            raise RuntimeError(response.text)
 
     elif name == "write_file":
         response = requests.post(
@@ -126,29 +141,31 @@ async def _dispatch(name: str, arguments: dict) -> str:
         if response.status_code == 200:
             return f"Successfully wrote to {arguments['path']}"
         else:
-            return f"Failed to write file: {response.status_code} - {response.text}"
+            raise RuntimeError(f"Failed to write: {response.status_code} - {response.text}")
 
     elif name == "delete_file":
         response = requests.delete(
             f"{MCP_SERVER_URL}/remove?path={arguments['path']}",
             headers=HEADERS, verify=VERIFY, timeout=10
         )
-        return "File deleted" if response.status_code == 200 else f"Error: {response.text}"
+        if response.status_code == 200:
+            return "File deleted"
+        else:
+            raise RuntimeError(response.text)
 
     else:
-        return f"Error: Unknown tool {name}"
+        raise ValueError(f"Unknown tool {name}")
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(stdio_server(server))
-```
+    
 
-Add `mcp` to `requirements.txt`:
-```
-certifi
-fastapi
-uvicorn
-pydantic
-requests
-mcp
+    async def main():
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options()
+            )
+
+    asyncio.run(main())

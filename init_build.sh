@@ -23,6 +23,10 @@ pip install \
   uvicorn \
   pydantic \
   pytest \
-  httpx
+  httpx \
+  requests \
+  mcp \
+  pytest-asyncio \
+  mcp-watchdog
 echo "[$(date +'%H:%M:%S')] Build environment initialized successfully!"
 echo "[$(date +'%H:%M:%S')] Note: Run 'source venv/bin/activate' in your terminal before running ./test.sh"
