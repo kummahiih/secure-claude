@@ -1,7 +1,0 @@
-certifi
-fastapi
-uvicorn
-pydantic
-requests
-mcp
-mcp-watchdog
