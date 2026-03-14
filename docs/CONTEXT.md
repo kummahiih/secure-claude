@@ -129,12 +129,12 @@ subprocess.run(
 ## File Structure
 
 ```
-secure-claude/
+secure-agent/claude/
 ├── cluster/                    ← all source code
 │   ├── caddy/
 │   │   ├── Caddyfile
 │   │   └── caddy_test.sh
-│   ├── claude/
+│   ├── agent/claude/
 │   │   ├── server.py           # FastAPI + subprocess
 │   │   ├── files_mcp.py        # MCP stdio server
 │   │   ├── entrypoint.sh       # startup, MCP registration
@@ -143,7 +143,7 @@ secure-claude/
 │   │   ├── requirements.txt    # certifi fastapi uvicorn pydantic requests mcp mcp-watchdog pytest httpx pytest-asyncio
 │   │   ├── claude_tests.py     # FastAPI unit tests
 │   │   └── files_mcp_test.py   # MCP tool unit tests
-│   ├── fileserver/
+│   ├── agent/fileserver/
 │   │   ├── main.go             # Go REST server
 │   │   ├── mcp_test.go
 │   │   └── go.mod
@@ -217,14 +217,14 @@ prompt-injected Claude could write code to test.sh or other scripts that print c
 
 Split into two repos:
 - secure-claude (this repo) — orchestration, secrets, certs, host scripts
-- secure-claude-agent (new repo) — only claude/ and fileserver/ source code
+- secure-claude-agent (new repo) — only agent/claude/ and agent/fileserver/ source code
 
 ```
-secure-claude/
+secure-agent/claude/
 ├── cluster/
 │   ├── agent/          ← git submodule → secure-claude-agent
-│   │   ├── claude/     ← Claude can read/write/commit
-│   │   └── fileserver/ ← Claude can read/write/commit
+│   │   ├── agent/claude/     ← Claude can read/write/commit
+│   │   └── agent/fileserver/ ← Claude can read/write/commit
 │   ├── caddy/          ← not in submodule, not mounted
 │   ├── proxy/          ← not in submodule, not mounted
 │   └── ...
@@ -243,7 +243,7 @@ never sees parent repo, secrets, or infrastructure code.
 
 ### Test isolation design:
 - Each language gets its own test container
-- Mounts only its own source folder (cluster/agent/claude/ or cluster/agent/fileserver/)
+- Mounts only its own source folder (cluster/agent/agent/claude/ or cluster/agent/agent/fileserver/)
 - conftest.py with autouse fixture blocks all real network calls
 - Claude writes new tests as mocked unit tests only — no credentials reachable
 

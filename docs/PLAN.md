@@ -15,14 +15,14 @@ The foundation. Everything else depends on this.
 ### Tasks
 
 - [ ] Create new GitHub repo `secure-claude-agent`
-- [ ] Move `cluster/claude/` and `cluster/fileserver/` into it
+- [ ] Move `cluster/agent/claude/` and `cluster/agent/fileserver/` into it
   - Use `git filter-repo` to preserve history, or just copy if history isn't needed
 - [ ] In `secure-claude`, remove those directories and add submodule at `cluster/agent/`
-- [ ] Update `Dockerfile.claude` build context → `cluster/agent/claude/`
-- [ ] Update `Dockerfile.mcp` build context → `cluster/agent/fileserver/`
+- [ ] Update `Dockerfile.claude` build context → `cluster/agent/agent/claude/`
+- [ ] Update `Dockerfile.mcp` build context → `cluster/agent/agent/fileserver/`
 - [ ] Update `docker-compose.yml` volumes so only `cluster/agent/` mounts as `/workspace`
 - [ ] Run `./test.sh` — all existing tests must pass unchanged
-- [ ] Verify from inside claude-server that `/workspace` contains only `claude/` and `fileserver/`, no secrets
+- [ ] Verify from inside claude-server that `/workspace` contains only `agent/claude/` and `agent/fileserver/`, no secrets
 
 ### Acceptance Criteria
 
@@ -41,7 +41,7 @@ clean, which makes this easier.
 
 ### Tasks
 
-- [ ] Create `cluster/agent/claude/git_mcp.py` — MCP stdio server for git operations
+- [ ] Create `cluster/agent/agent/claude/git_mcp.py` — MCP stdio server for git operations
   - Follow same pattern as `files_mcp.py`: subprocess calls, structural directory lock
   - Tools: `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`
   - Working directory locked to mount point (not path filtering)
@@ -71,8 +71,8 @@ The most complex piece.
 
 - [ ] Create `cluster/test-runner/` — lives outside agent submodule (Claude can't modify it)
 - [ ] Build Python MCP stdio server that invokes `docker run` with pre-built test images
-- [ ] Python test image: mounts `cluster/agent/claude/`, runs pytest, returns JSON output
-- [ ] Go test image: mounts `cluster/agent/fileserver/`, runs `go test -json`, returns structured output
+- [ ] Python test image: mounts `cluster/agent/agent/claude/`, runs pytest, returns JSON output
+- [ ] Go test image: mounts `cluster/agent/agent/fileserver/`, runs `go test -json`, returns structured output
 - [ ] Add `conftest.py` with autouse network-blocking fixture to agent repo
 - [ ] Register test runner as MCP tool in `entrypoint.sh`
 - [ ] Test: query Claude to "run the tests" and verify structured pass/fail output

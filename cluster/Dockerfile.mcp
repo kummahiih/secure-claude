@@ -1,6 +1,6 @@
 FROM golang:1.26.1-alpine AS builder
 WORKDIR /app
-COPY fileserver/* .
+COPY agent/fileserver/* .
 RUN go build -o mcp-server main.go
 
 # Stage 2: Certificate Signer

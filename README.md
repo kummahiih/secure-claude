@@ -61,7 +61,7 @@ All containers run as non-root users (UID 1000). cap_drop: ALL is set on the pro
 │   ├── caddy/
 │   │   ├── Caddyfile               # TLS and reverse proxy config
 │   │   └── caddy_test.sh           # Caddy validation script
-│   ├── claude/
+│   ├── agent/claude/
 │   │   ├── server.py               # FastAPI server, Claude Code subprocess
 │   │   ├── files_mcp.py            # MCP stdio server wrapping Go REST API
 │   │   ├── entrypoint.sh           # Registers MCP tools, locks config, starts server
@@ -70,7 +70,7 @@ All containers run as non-root users (UID 1000). cap_drop: ALL is set on the pro
 │   │   ├── requirements.txt        # Python dependencies
 │   │   ├── claude_tests.py         # FastAPI unit tests
 │   │   └── files_mcp_test.py       # MCP tool unit tests
-│   ├── fileserver/
+│   ├── agent/fileserver/
 │   │   ├── main.go                 # Go MCP REST server with os.OpenRoot jail
 │   │   ├── mcp_test.go             # Go unit tests
 │   │   └── go.mod                  # Go module dependencies
@@ -168,10 +168,10 @@ The full test suite runs automatically with ./test.sh and covers:
 
 | Tool | Focus | Target |
 | :--- | :--- | :--- |
-| pytest | Unit tests | claude/ Python server and MCP tools |
-| go test | Unit tests | fileserver/ Go MCP server |
-| pip-audit | CVE scanning | claude/requirements.txt |
-| govulncheck | CVE scanning | fileserver/ Go modules |
+| pytest | Unit tests | agent/claude/ Python server and MCP tools |
+| go test | Unit tests | agent/fileserver/ Go MCP server |
+| pip-audit | CVE scanning | agent/claude/requirements.txt |
+| govulncheck | CVE scanning | agent/fileserver/ Go modules |
 | hadolint | Dockerfile linting | All Dockerfile.* |
 | trivy | Misconfiguration | docker-compose.yml + images |
 

@@ -4,6 +4,7 @@ set -euo pipefail
 echo "[$(date +'%H:%M:%S')] Starting automated test suite..."
 . venv/bin/activate
 
+
 # Generate any missing files via setup
 bash ./run.sh --setup-only 
 
@@ -16,7 +17,7 @@ echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 4/6: Running Dependency Security Scans..."
 
 echo "[+] Scanning Go Fileserver (govulncheck)..."
-(cd cluster/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./...)
+(cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./...)
 
 echo "[+] Scanning Python Agent (pip-audit)..."
 # Activates the environment, installs pip-audit, and scans the installed packages
@@ -27,7 +28,7 @@ echo "🔍 Auditing Python dependencies..."
     -v "$(pwd)":/app \
     -w /app \
     python:3.11-slim /bin/bash -c \
-    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r claude/requirements.txt"
+    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r agent/claude/requirements.txt"
 )
 DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy")
 
@@ -49,11 +50,11 @@ echo "[$(date +'%H:%M:%S')] 1/6: Validating Caddy Edge Router..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
-(cd cluster/fileserver && go test mcp_test.go main.go -v)
+(cd cluster/agent/fileserver && go test mcp_test.go main.go -v)
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 3/6: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/claude && pytest claude_tests.py files_mcp_test.py -v)
+(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py -v)
 
 
 echo "----------------------------------------"
@@ -72,7 +73,7 @@ echo "[$(date +'%H:%M:%S')] 6/6: Running Docker Integration Tests..."
 echo "[$(date +'%H:%M:%S')] Waiting for Caddy and FastAPI to initialize (20s)..."
 sleep 20
 
-echo "$(timestamp) Checking MCP server registration..."
+echo "$(date +'%H:%M:%S') Checking MCP server registration..."
 if docker exec claude-server claude mcp list | grep -q "fileserver"; then
   echo "  ✅ MCP fileserver registered"
 else
@@ -81,7 +82,7 @@ else
   exit 1
 fi
 
-echo "$(timestamp) Checking MCP server health..."
+echo "$(date +'%H:%M:%S') Checking MCP server health..."
 if docker exec claude-server claude mcp list | grep -q "✓"; then
   echo "  ✅ MCP fileserver healthy"
 else

@@ -32,7 +32,7 @@ RUN addgroup --gid 1000 appgroup && \
 WORKDIR /app
 
 # Copy the requirements file into the container
-COPY claude/requirements.txt /tmp/requirements.txt
+COPY agent/claude/requirements.txt /tmp/requirements.txt
 
 # Install dependencies from the file
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
@@ -69,8 +69,8 @@ RUN cat /app/certs/ca.crt >> "$(python -c 'import certifi; print(certifi.where()
 RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 
 # Copy the server script and enforce correct ownership
-COPY --chown=appuser:appgroup claude/*.py .
-COPY --chown=appuser:appgroup claude/entrypoint.sh /app/entrypoint.sh
+COPY --chown=appuser:appgroup agent/claude/*.py .
+COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
 
 # Lock down /app - readable but not writable by appuser
 RUN chmod -R 550 /app && \

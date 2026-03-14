@@ -10,6 +10,8 @@ workspace/
 venv/
 __pycache__/
 .pytest_cache/
+cluster/agent/claude/__pycache__/
+cluster/agent/claude/.pytest_cache/
 
 #aider AI chat histories
 .aider.*
