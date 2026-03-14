@@ -8,32 +8,37 @@ can read, modify, test, and commit its own source code autonomously.
 
 ---
 
-## Phase 1: Git Submodule Split (Days 1–2, ~4–6 hours)
+## Phase 1: Git Submodule Split (Days 1–2, ~4–6 hours) ✅ COMPLETE
 
 The foundation. Everything else depends on this.
 
 ### Tasks
 
-- [ ] Create new GitHub repo `secure-claude-agent`
-- [ ] Move `cluster/agent/claude/` and `cluster/agent/fileserver/` into it
-  - Use `git filter-repo` to preserve history, or just copy if history isn't needed
-- [ ] In `secure-claude`, remove those directories and add submodule at `cluster/agent/`
-- [ ] Update `Dockerfile.claude` build context → `cluster/agent/agent/claude/`
-- [ ] Update `Dockerfile.mcp` build context → `cluster/agent/agent/fileserver/`
-- [ ] Update `docker-compose.yml` volumes so only `cluster/agent/` mounts as `/workspace`
-- [ ] Run `./test.sh` — all existing tests must pass unchanged
-- [ ] Verify from inside claude-server that `/workspace` contains only `agent/claude/` and `agent/fileserver/`, no secrets
+- [x] Create new GitHub repo `secure-claude-agent`
+- [x] Move `cluster/claude/` and `cluster/fileserver/` into `cluster/agent/`
+- [x] Extract with `git filter-repo` to preserve history
+- [x] In `secure-claude`, remove agent directory and add submodule at `cluster/agent/`
+- [x] Update `Dockerfile.claude` COPY paths → `agent/claude/...`
+- [x] Update `Dockerfile.mcp` COPY paths → `agent/fileserver/...`
+- [x] Update `docker-compose.yml` volumes and build contexts
+- [x] Update `test.sh` paths
+- [x] Run `./test.sh` — all existing tests pass
+- [x] Full query loop works end-to-end
 
-### Acceptance Criteria
+### Decisions Made During Phase 1
 
-Full test suite passes. `docker exec` into claude-server confirms `/workspace` has no
-docker-compose.yml, no proxy_config.yaml, no .secrets.env references.
+- Dockerfiles stay in parent repo (cluster/) — they need certs/ at build time and
+  should not be agent-modifiable
+- Single submodule rather than multiple — claude/ and fileserver/ are tightly coupled,
+  future MCP tools (git, test runner) will go in the same submodule
+- caddy/ and proxy/ stay in parent repo — pure infrastructure, not agent code
+- Docs moved to docs/ directory
 
-### Notes
+### Remaining: Acceptance Criteria Verification
 
-Main annoyance will be updating relative paths in Dockerfiles and compose volumes.
-The split between root scripts (touch secrets) and cluster/ (source only) is already
-clean, which makes this easier.
+- [ ] Verify from inside claude-server that `/workspace` contains only `claude/` and `fileserver/`, no secrets
+  - `docker exec` into claude-server, check /workspace has no docker-compose.yml, proxy_config.yaml, .secrets.env
+- [ ] Verify submodule `.git` does not leak parent repo info
 
 ---
 
@@ -41,7 +46,7 @@ clean, which makes this easier.
 
 ### Tasks
 
-- [ ] Create `cluster/agent/agent/claude/git_mcp.py` — MCP stdio server for git operations
+- [ ] Create `cluster/agent/claude/git_mcp.py` — MCP stdio server for git operations
   - Follow same pattern as `files_mcp.py`: subprocess calls, structural directory lock
   - Tools: `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`
   - Working directory locked to mount point (not path filtering)
@@ -71,8 +76,8 @@ The most complex piece.
 
 - [ ] Create `cluster/test-runner/` — lives outside agent submodule (Claude can't modify it)
 - [ ] Build Python MCP stdio server that invokes `docker run` with pre-built test images
-- [ ] Python test image: mounts `cluster/agent/agent/claude/`, runs pytest, returns JSON output
-- [ ] Go test image: mounts `cluster/agent/agent/fileserver/`, runs `go test -json`, returns structured output
+- [ ] Python test image: mounts `cluster/agent/claude/`, runs pytest, returns JSON output
+- [ ] Go test image: mounts `cluster/agent/fileserver/`, runs `go test -json`, returns structured output
 - [ ] Add `conftest.py` with autouse network-blocking fixture to agent repo
 - [ ] Register test runner as MCP tool in `entrypoint.sh`
 - [ ] Test: query Claude to "run the tests" and verify structured pass/fail output
@@ -118,7 +123,6 @@ all without human intervention.
 
 - [ ] Resource limits on test runner containers (timeout, memory)
 - [ ] Output sanitization from test runner (strip any leaked env vars)
-- [ ] Update CONTEXT.md to reflect new architecture
 - [ ] Update README.md with agentic workflow documentation
 - [ ] Tag a release
 
@@ -137,8 +141,8 @@ all without human intervention.
 
 | Risk | Impact | Likelihood | Mitigation |
 | :--- | :--- | :--- | :--- |
-| Docker build context paths break after submodule split | Blocks all work | Medium | Budget extra time in Phase 1, test thoroughly |
-| Submodule `.git` leaks parent repo info | Security gap | Low | Verify with `docker exec` inspection |
+| ~~Docker build context paths break after submodule split~~ | ~~Blocks all work~~ | ~~Medium~~ | ✅ Resolved — paths updated, tests pass |
+| Submodule `.git` leaks parent repo info | Security gap | Low | Verify with `docker exec` inspection (Phase 1 remaining) |
 | Test runner Docker socket access creates escape vector | Security gap | Medium | Document, consider rootless Docker or Sysbox |
 | Integration debugging takes longer than estimated | Schedule slip | High | Phases 1–3 are the priority; Phase 5 is buffer |
 | Claude Code doesn't handle MCP tool errors gracefully | Poor agentic loop | Medium | Test error paths explicitly in Phase 4 |

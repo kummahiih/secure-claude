@@ -10,7 +10,9 @@ Built by iteratively adapting two predecessor projects:
 - secure-coder (https://github.com/kummahiih/secure-coder) — credential isolation via LiteLLM sidecar
 - secure-mcp (https://github.com/kummahiih/secure-mcp) — MCP server with Go os.OpenRoot filesystem jail
 
-Repo: https://github.com/kummahiih/secure-claude
+Repos:
+- Parent: https://github.com/kummahiih/secure-claude
+- Agent submodule: https://github.com/kummahiih/secure-claude-agent
 
 ---
 
@@ -22,7 +24,7 @@ Host / Network
      └─> claude-server:8000 (FastAPI + Claude Code subprocess)
           ├─> proxy:4000 (LiteLLM) ──> Anthropic API
           └─> mcp-server:8443 (Go REST, os.OpenRoot jail)
-               └─> /workspace (bind mount)
+               └─> /workspace (bind mount → cluster/agent/)
 ```
 
 ### Four containers, all on internal Docker network (int_net):
@@ -54,7 +56,7 @@ Examples of structural enforcement in this project:
 - Go os.OpenRoot for filesystem jail (not path string checking)
 - Separate Docker networks (not firewall rules)
 - Mount boundaries for secrets isolation (not env var filtering)
-- Submodule repos for agent code isolation (not path filtering in git tools)
+- Git submodule repo for agent code isolation (not path filtering in git tools)
 - mcp-watchdog as transparent proxy (not inline checks in tool code)
 
 ### Security layers in order:
@@ -62,10 +64,83 @@ Examples of structural enforcement in this project:
 2. Network isolation — claude-server on int_net only, no direct internet
 3. MCP security proxy — mcp-watchdog intercepts all JSON-RPC, blocks 40+ attack classes
 4. Filesystem jail — os.OpenRoot at /workspace, traversal blocked at Go runtime level
-5. Dual auth — AGENT_API_TOKEN for ingress, MCP_API_TOKEN for internal service calls
-6. TLS everywhere — internal CA, all service-to-service over HTTPS
-7. Read-only agent config — .claude.json locked to 440 after startup
-8. Non-root containers — UID 1000, cap_drop: ALL on proxy
+5. Repo isolation — agent submodule mounted as /workspace; parent repo (Dockerfiles, certs, secrets) not visible
+6. Dual auth — AGENT_API_TOKEN for ingress, MCP_API_TOKEN for internal service calls
+7. TLS everywhere — internal CA, all service-to-service over HTTPS
+8. Read-only agent config — .claude.json locked to 440 after startup
+9. Non-root containers — UID 1000, cap_drop: ALL on proxy
+
+---
+
+## Repo Structure: Two-Repo Split
+
+The project is split into two repos with a git submodule boundary.
+This is a structural security boundary — the agent can only see and modify its own code.
+
+### Parent repo: secure-claude
+
+Orchestration, infrastructure, secrets. Never mounted into containers as /workspace.
+
+```
+secure-claude/
+├── cluster/
+│   ├── agent/                  ← git submodule → secure-claude-agent
+│   │   ├── claude/
+│   │   └── fileserver/
+│   ├── caddy/
+│   │   ├── Caddyfile
+│   │   └── caddy_test.sh
+│   ├── proxy/
+│   │   ├── proxy_config.yaml
+│   │   └── proxy_wrapper.py
+│   ├── docker-compose.yml
+│   ├── Dockerfile.caddy
+│   ├── Dockerfile.claude
+│   ├── Dockerfile.mcp
+│   ├── Dockerfile.proxy
+│   └── start-cluster.sh
+├── docs/
+│   ├── CONTEXT.md              ← this file
+│   └── PLAN.md
+├── init_build.sh
+├── logs.sh
+├── query.sh
+├── run.sh
+├── test.sh
+├── .secrets.env                ← gitignored, real ANTHROPIC_API_KEY
+├── .cluster_tokens.env         ← gitignored, generated ephemeral tokens
+├── certs/                      ← gitignored, generated TLS certs
+├── LICENSE
+└── README.md
+```
+
+### Agent submodule: secure-claude-agent
+
+Application code only. Mounted as /workspace. This is all the agent can see.
+
+```
+secure-claude-agent/
+├── claude/
+│   ├── server.py               # FastAPI + subprocess
+│   ├── files_mcp.py            # MCP stdio server
+│   ├── entrypoint.sh           # startup, MCP registration
+│   ├── runenv.py               # env var validation
+│   ├── setuplogging.py
+│   ├── requirements.txt
+│   ├── claude_tests.py         # FastAPI unit tests
+│   └── files_mcp_test.py       # MCP tool unit tests
+└── fileserver/
+    ├── main.go                 # Go REST server
+    ├── mcp_test.go
+    └── go.mod
+```
+
+### Why this split:
+- Parent repo holds Dockerfiles, certs, compose, secrets, host scripts — infrastructure the agent must not modify
+- Agent repo holds application code — the only thing the agent needs to read, write, test, and commit
+- Dockerfiles stay in parent repo because they need access to certs/ at build time (multi-stage signer)
+- claude/ and fileserver/ are tightly coupled (files_mcp.py wraps Go REST endpoints) so they share one submodule
+- Future MCP tools (git, test runner) will also go in the agent submodule for the same coupling reason
 
 ---
 
@@ -74,7 +149,7 @@ Examples of structural enforcement in this project:
 ### claude-server container (Dockerfile.claude)
 - Base: python:3.12-slim
 - Node.js 22 installed via NodeSource for Claude Code CLI
-- Two users: appuser (FastAPI, UID 1000), no claudeuser yet
+- Multi-stage build: signer stage generates per-service TLS cert from internal CA
 - /app locked to 550 after build — agent can't read server source
 - /home/appuser/sandbox — empty cwd for Claude Code subprocess
 - /home/appuser/.claude.json — MCP registration, locked to 440
@@ -126,53 +201,6 @@ subprocess.run(
 
 ---
 
-## File Structure
-
-```
-secure-agent/claude/
-├── cluster/                    ← all source code
-│   ├── caddy/
-│   │   ├── Caddyfile
-│   │   └── caddy_test.sh
-│   ├── agent/claude/
-│   │   ├── server.py           # FastAPI + subprocess
-│   │   ├── files_mcp.py        # MCP stdio server
-│   │   ├── entrypoint.sh       # startup, MCP registration
-│   │   ├── runenv.py           # env var validation
-│   │   ├── setuplogging.py
-│   │   ├── requirements.txt    # certifi fastapi uvicorn pydantic requests mcp mcp-watchdog pytest httpx pytest-asyncio
-│   │   ├── claude_tests.py     # FastAPI unit tests
-│   │   └── files_mcp_test.py   # MCP tool unit tests
-│   ├── agent/fileserver/
-│   │   ├── main.go             # Go REST server
-│   │   ├── mcp_test.go
-│   │   └── go.mod
-│   ├── proxy/
-│   │   ├── proxy_config.yaml   # claude-sonnet-4-6, claude-opus-4-6
-│   │   └── proxy_wrapper.py
-│   ├── docker-compose.yml
-│   ├── Dockerfile.caddy
-│   ├── Dockerfile.claude
-│   ├── Dockerfile.mcp
-│   ├── Dockerfile.proxy
-│   └── start-cluster.sh
-├── init_build.sh               ← host only, sets up venv
-├── logs.sh                     ← host only, docker logs (leaks env vars)
-├── run.sh                      ← host only, generates certs+tokens, starts cluster
-├── .secrets.env                ← gitignored, real ANTHROPIC_API_KEY
-├── .cluster_tokens.env         ← gitignored, generated ephemeral tokens
-├── certs/                      ← gitignored, generated TLS certs
-└── README.md
-```
-
-### Why scripts are split between root and cluster/:
-- root level: scripts that touch secrets, certs, tokens, or Docker daemon directly
-- cluster/: scripts that only operate on source code or send queries
-- This split is intentional — if cluster/ is mounted as /workspace for agentic use,
-  the agent sees only source code, never credentials
-
----
-
 ## Test Suite (test.sh)
 
 Runs in order:
@@ -197,61 +225,11 @@ Runs in order:
 - Claude Code reads/writes/lists/deletes files in /workspace exclusively via MCP tools
 - mcp-watchdog intercepts all JSON-RPC traffic as security proxy
 - Credential isolation confirmed: agent never sees real ANTHROPIC_API_KEY
+- Repo isolation confirmed: agent submodule contains only application code, no secrets or infrastructure
 - TLS working on all internal connections
 - Token auth working on ingress and MCP endpoints
 - Unit tests passing for FastAPI server and MCP tools
 - Pro subscription OAuth token works as ANTHROPIC_API_KEY (sk-ant-oat01-...)
-
----
-
-## Next Steps: Agentic Development Loop
-
-The goal is to use secure-claude to develop itself autonomously.
-
-### Problem: secrets exposure if repo is mounted as /workspace
-If cluster/ is mounted as /workspace, Claude can see docker-compose.yml, proxy_config.yaml,
-and other files that reference secret env var names. More critically, a malicious or
-prompt-injected Claude could write code to test.sh or other scripts that print credentials.
-
-### Solution: structural isolation via git submodule
-
-Split into two repos:
-- secure-claude (this repo) — orchestration, secrets, certs, host scripts
-- secure-claude-agent (new repo) — only agent/claude/ and agent/fileserver/ source code
-
-```
-secure-agent/claude/
-├── cluster/
-│   ├── agent/          ← git submodule → secure-claude-agent
-│   │   ├── agent/claude/     ← Claude can read/write/commit
-│   │   └── agent/fileserver/ ← Claude can read/write/commit
-│   ├── caddy/          ← not in submodule, not mounted
-│   ├── proxy/          ← not in submodule, not mounted
-│   └── ...
-```
-
-Mount only cluster/agent/ as /workspace. Claude gets full git access to its own repo,
-never sees parent repo, secrets, or infrastructure code.
-
-### MCP tools needed for agentic loop:
-1. test_runner — runs pytest (Python) and go test (Go) in isolated containers,
-   mounts only the relevant source subfolder, returns structured output.
-   Lives outside /workspace so Claude cannot modify it.
-2. git tools — git_status, git_diff, git_add, git_commit, git_log.
-   Operates only on the submodule repo. Path filtering explicitly avoided
-   (vulnerable to traversal) — structural mount boundary enforces scope instead.
-
-### Test isolation design:
-- Each language gets its own test container
-- Mounts only its own source folder (cluster/agent/agent/claude/ or cluster/agent/agent/fileserver/)
-- conftest.py with autouse fixture blocks all real network calls
-- Claude writes new tests as mocked unit tests only — no credentials reachable
-
-### Why not simpler approaches:
-- Mounting full repo: secrets exposure via docker-compose.yml, proxy_config.yaml
-- Path filtering in git tool: vulnerable to ../, symlinks, UTF-8 tricks (same reason
-  Go uses os.OpenRoot instead of path string checking)
-- Human approval before commit: defeats the purpose of autonomous loop
 
 ---
 
@@ -263,6 +241,8 @@ never sees parent repo, secrets, or infrastructure code.
 | MCP transport | stdio (files_mcp.py) | HTTP direct to Go server | Go server is REST not MCP protocol |
 | MCP error typing | CallToolResult isError=True | Return error strings | Ambiguous to mix errors and content in same type |
 | Git isolation | Submodule repo | Path filtering | Path filtering vulnerable to traversal attacks |
+| Submodule count | Single submodule (agent) | Multiple (agent, mcp, tools) | claude/ and fileserver/ are tightly coupled; future tools share same coupling |
+| Dockerfile location | Parent repo (cluster/) | Inside submodule | Dockerfiles need certs/ at build time; also keeps agent from modifying its own container |
 | Test isolation | Per-language containers | Shared test runner | Mount boundary enforces scope structurally |
 | Config locking | chmod 440 on .claude.json | Directory chmod 550 | Directory lock prevents Claude Code writing session state |
 | Credential flow | OAuth token (sk-ant-oat01-) | API key | Pro subscription, no per-token billing |
