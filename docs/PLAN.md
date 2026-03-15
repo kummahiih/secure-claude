@@ -8,7 +8,7 @@ can read, modify, test, and commit its own source code autonomously.
 
 ---
 
-## Phase 1: Git Submodule Split (Days 1–2, ~4–6 hours) ✅ COMPLETE
+## Phase 1: Git Submodule Split + Isolation Verification (Days 1–3) ✅ COMPLETE
 
 The foundation. Everything else depends on this.
 
@@ -25,6 +25,26 @@ The foundation. Everything else depends on this.
 - [x] Run `./test.sh` — all existing tests pass
 - [x] Full query loop works end-to-end
 
+### Isolation Verification (added during Phase 1)
+
+- [x] Create `verify_isolation.py` — runtime isolation checks for all 4 container roles
+- [x] Create `test_isolation.py` — unit tests for isolation checks
+- [x] Wire into claude-server entrypoint (verify_isolation.py claude-server)
+- [x] Wire into mcp-server entrypoint (shell checks in fileserver/entrypoint.sh)
+- [x] Wire into proxy startup (inline checks in proxy_wrapper.py)
+- [x] Wire into caddy startup (caddy_entrypoint.sh)
+- [x] Fix credential rename: DYNAMIC_AGENT_KEY in env, renamed to ANTHROPIC_API_KEY in subprocess only
+- [x] Fix MCP config: bake .mcp.json into image at build time, pass via --mcp-config flag
+- [x] Fix system prompt: stronger prompt denying local filesystem, naming MCP tools explicitly
+- [x] Extract SYSTEM_PROMPT into runenv.py as shared constant
+- [x] Pin Claude Code version to @2.1.74
+- [x] Remove chmod 440 on .claude.json (Claude Code needs write access for session state)
+- [x] Remove `claude mcp add` from entrypoint (replaced by build-time .mcp.json)
+- [x] Fix docker-compose.yml: stop passing MCP_API_TOKEN and CLAUDE_API_TOKEN to proxy
+- [x] Update test.sh: reduced verbosity, updated MCP registration check
+- [x] Verify /workspace contains only agent code (via verify_isolation.py workspace whitelist)
+- [x] Verify .git doesn't leak parent repo info (via verify_isolation.py gitfile check)
+
 ### Decisions Made During Phase 1
 
 - Dockerfiles stay in parent repo (cluster/) — they need certs/ at build time and
@@ -33,16 +53,21 @@ The foundation. Everything else depends on this.
   future MCP tools (git, test runner) will go in the same submodule
 - caddy/ and proxy/ stay in parent repo — pure infrastructure, not agent code
 - Docs moved to docs/ directory
+- --mcp-config flag required for --print mode (Claude Code doesn't auto-discover config)
+- verify_isolation.py must never run in MCP subprocess children (false positive on ANTHROPIC_API_KEY)
+- .mcp.json baked into image as build artifact, not written at runtime
 
-### Remaining: Acceptance Criteria Verification
+### Key Bugs Found and Fixed
 
-- [ ] Verify from inside claude-server that `/workspace` contains only `claude/` and `fileserver/`, no secrets
-  - `docker exec` into claude-server, check /workspace has no docker-compose.yml, proxy_config.yaml, .secrets.env
-- [ ] Verify submodule `.git` does not leak parent repo info
+- Claude Code --print mode does not auto-discover MCP config from .claude.json or any scope
+- claude mcp add --scope user/local/project all write to different locations depending on version
+- chmod 440 on .claude.json prevents Claude Code from writing session state, silently drops mcpServers
+- verify_isolation.py in files_mcp.py killed the MCP server (ANTHROPIC_API_KEY inherited from Claude Code)
+- --mcp-config flag is variadic — needs `--` separator before the query argument
 
 ---
 
-## Phase 2: Git MCP Tools (Day 3, ~6–8 hours)
+## Phase 2: Git MCP Tools (Day 4, ~6–8 hours)
 
 ### Tasks
 
@@ -50,7 +75,8 @@ The foundation. Everything else depends on this.
   - Follow same pattern as `files_mcp.py`: subprocess calls, structural directory lock
   - Tools: `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`
   - Working directory locked to mount point (not path filtering)
-- [ ] Register in `entrypoint.sh` alongside fileserver tools (through mcp-watchdog)
+- [ ] Add git MCP server to .mcp.json (build-time, in Dockerfile.claude)
+- [ ] Register in --mcp-config alongside fileserver tools (through mcp-watchdog)
 - [ ] Write `git_mcp_test.py` with temporary git repo fixture
 - [ ] Verify via test query that Claude sees both fileserver and git tool sets
 
@@ -60,6 +86,7 @@ The foundation. Everything else depends on this.
   separate isolation problem. Commits stay local; human pushes.
 - The mounted submodule directory must have `.git` available inside the container,
   but the parent repo's `.git` must not be reachable.
+- git_mcp.py must NOT call verify_isolation.py (same child process issue as files_mcp.py)
 
 ### Acceptance Criteria
 
@@ -68,7 +95,7 @@ MCP tools. Unit tests pass with a temporary git repo fixture.
 
 ---
 
-## Phase 3: Test Runner MCP Tool (Days 4–5, ~8–10 hours)
+## Phase 3: Test Runner MCP Tool (Days 5–6, ~8–10 hours)
 
 The most complex piece.
 
@@ -79,7 +106,7 @@ The most complex piece.
 - [ ] Python test image: mounts `cluster/agent/claude/`, runs pytest, returns JSON output
 - [ ] Go test image: mounts `cluster/agent/fileserver/`, runs `go test -json`, returns structured output
 - [ ] Add `conftest.py` with autouse network-blocking fixture to agent repo
-- [ ] Register test runner as MCP tool in `entrypoint.sh`
+- [ ] Register test runner as MCP tool in .mcp.json
 - [ ] Test: query Claude to "run the tests" and verify structured pass/fail output
 
 ### Design Decisions
@@ -96,7 +123,7 @@ Python and Go tests. Tests run in isolated containers with no access to secrets.
 
 ---
 
-## Phase 4: Close the Loop (Days 6–8, ~8–12 hours)
+## Phase 4: Close the Loop (Days 7–9, ~8–12 hours)
 
 Wire everything together and prove the autonomous cycle works.
 
@@ -117,7 +144,7 @@ all without human intervention.
 
 ---
 
-## Phase 5: Hardening and Polish (Days 9–10, remaining hours)
+## Phase 5: Hardening and Polish (Days 10–11, remaining hours)
 
 ### Tasks
 
@@ -142,10 +169,13 @@ all without human intervention.
 | Risk | Impact | Likelihood | Mitigation |
 | :--- | :--- | :--- | :--- |
 | ~~Docker build context paths break after submodule split~~ | ~~Blocks all work~~ | ~~Medium~~ | ✅ Resolved — paths updated, tests pass |
-| Submodule `.git` leaks parent repo info | Security gap | Low | Verify with `docker exec` inspection (Phase 1 remaining) |
+| ~~Submodule `.git` leaks parent repo info~~ | ~~Security gap~~ | ~~Low~~ | ✅ Resolved — verify_isolation.py checks gitfile target |
+| ~~Claude Code --print mode doesn't load MCP config~~ | ~~Blocks MCP tools~~ | ~~High~~ | ✅ Resolved — --mcp-config flag + build-time .mcp.json |
+| ~~verify_isolation.py false-positives in MCP children~~ | ~~MCP server crashes~~ | ~~High~~ | ✅ Resolved — only run at entrypoint, never in subprocess children |
 | Test runner Docker socket access creates escape vector | Security gap | Medium | Document, consider rootless Docker or Sysbox |
 | Integration debugging takes longer than estimated | Schedule slip | High | Phases 1–3 are the priority; Phase 5 is buffer |
 | Claude Code doesn't handle MCP tool errors gracefully | Poor agentic loop | Medium | Test error paths explicitly in Phase 4 |
+| Claude Code version upgrade breaks --mcp-config or --print behavior | Blocks everything | Medium | Version pinned to @2.1.74; test before upgrading |
 
 ---
 

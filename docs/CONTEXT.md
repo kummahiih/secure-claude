@@ -20,7 +20,7 @@ Repos:
 
 ```
 Host / Network
-└─> Caddy:8443 (TLS 1.3 + Bearer auth)
+└─> Caddy:8443 (TLS 1.3 + reverse proxy)
      └─> claude-server:8000 (FastAPI + Claude Code subprocess)
           ├─> proxy:4000 (LiteLLM) ──> Anthropic API
           └─> mcp-server:8443 (Go REST, os.OpenRoot jail)
@@ -29,17 +29,18 @@ Host / Network
 
 ### Four containers, all on internal Docker network (int_net):
 
-| Service | Description |
-| :--- | :--- |
-| caddy-sidecar | TLS termination, external ingress, Bearer auth |
-| claude-server | FastAPI + Claude Code CLI subprocess |
-| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY |
-| mcp-server | Go REST server, os.OpenRoot jail at /workspace |
+| Service | Description | Isolation checks |
+| :--- | :--- | :--- |
+| caddy-sidecar | TLS termination, external ingress, reverse proxy | caddy_entrypoint.sh |
+| claude-server | FastAPI + Claude Code CLI subprocess | verify_isolation.py (26 checks) |
+| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY | proxy_wrapper.py (4 checks) |
+| mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
 
 ### Request flow:
-1. `query.sh` → POST https://localhost:8443/ask (Bearer AGENT_API_TOKEN)
+1. `query.sh` → POST https://localhost:8443/ask (Bearer CLAUDE_API_TOKEN)
 2. Caddy → claude-server:8000/ask
-3. FastAPI → subprocess: `claude --print --dangerously-skip-permissions --output-format json --model <model> --system-prompt <prompt> <query>`
+3. FastAPI verifies Bearer token, then subprocess:
+   `claude --print --dangerously-skip-permissions --output-format json --mcp-config /home/appuser/sandbox/.mcp.json --model <model> --system-prompt <prompt> -- <query>`
 4. Claude Code → mcp-watchdog (stdio) → files_mcp.py (stdio MCP server) → HTTPS REST → mcp-server:8443
 5. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → Anthropic API
 
@@ -58,6 +59,7 @@ Examples of structural enforcement in this project:
 - Mount boundaries for secrets isolation (not env var filtering)
 - Git submodule repo for agent code isolation (not path filtering in git tools)
 - mcp-watchdog as transparent proxy (not inline checks in tool code)
+- Runtime isolation checks that fail-hard at startup (not runtime filtering)
 
 ### Security layers in order:
 1. Credential isolation — agent uses DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
@@ -65,10 +67,12 @@ Examples of structural enforcement in this project:
 3. MCP security proxy — mcp-watchdog intercepts all JSON-RPC, blocks 40+ attack classes
 4. Filesystem jail — os.OpenRoot at /workspace, traversal blocked at Go runtime level
 5. Repo isolation — agent submodule mounted as /workspace; parent repo (Dockerfiles, certs, secrets) not visible
-6. Dual auth — AGENT_API_TOKEN for ingress, MCP_API_TOKEN for internal service calls
+6. Dual auth — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal service calls
 7. TLS everywhere — internal CA, all service-to-service over HTTPS
-8. Read-only agent config — .claude.json locked to 440 after startup
-9. Non-root containers — UID 1000, cap_drop: ALL on proxy
+8. Startup isolation checks — every container validates env vars, forbidden paths, .env file absence
+9. MCP config as build artifact — .mcp.json baked into image, passed via --mcp-config flag
+10. Non-root containers — UID 1000, cap_drop: ALL on proxy
+11. Claude Code version pinned — @2.1.74, no surprise breakage on rebuild
 
 ---
 
@@ -88,11 +92,12 @@ secure-claude/
 │   │   ├── claude/
 │   │   └── fileserver/
 │   ├── caddy/
+│   │   ├── caddy_entrypoint.sh # Isolation checks + exec caddy
 │   │   ├── Caddyfile
 │   │   └── caddy_test.sh
 │   ├── proxy/
 │   │   ├── proxy_config.yaml
-│   │   └── proxy_wrapper.py
+│   │   └── proxy_wrapper.py    # Isolation checks + LiteLLM startup
 │   ├── docker-compose.yml
 │   ├── Dockerfile.caddy
 │   ├── Dockerfile.claude
@@ -122,15 +127,18 @@ Application code only. Mounted as /workspace. This is all the agent can see.
 secure-claude-agent/
 ├── claude/
 │   ├── server.py               # FastAPI + subprocess
-│   ├── files_mcp.py            # MCP stdio server
-│   ├── entrypoint.sh           # startup, MCP registration
-│   ├── runenv.py               # env var validation
+│   ├── files_mcp.py            # MCP stdio server (wraps Go REST)
+│   ├── entrypoint.sh           # Isolation check + exec server.py
+│   ├── runenv.py               # Env var validation + SYSTEM_PROMPT
+│   ├── verify_isolation.py     # Runtime isolation checks (all 4 roles)
+│   ├── test_isolation.py       # Unit tests for isolation checks
 │   ├── setuplogging.py
 │   ├── requirements.txt
 │   ├── claude_tests.py         # FastAPI unit tests
 │   └── files_mcp_test.py       # MCP tool unit tests
 └── fileserver/
     ├── main.go                 # Go REST server
+    ├── entrypoint.sh           # Isolation check + exec mcp-server
     ├── mcp_test.go
     └── go.mod
 ```
@@ -149,24 +157,28 @@ secure-claude-agent/
 ### claude-server container (Dockerfile.claude)
 - Base: python:3.12-slim
 - Node.js 22 installed via NodeSource for Claude Code CLI
+- Claude Code pinned: @anthropic-ai/claude-code@2.1.74
 - Multi-stage build: signer stage generates per-service TLS cert from internal CA
 - /app locked to 550 after build — agent can't read server source
-- /home/appuser/sandbox — empty cwd for Claude Code subprocess
-- /home/appuser/.claude.json — MCP registration, locked to 440
+- /home/appuser/sandbox — empty cwd for Claude Code subprocess, chmod 500
+- /home/appuser/sandbox/.mcp.json — MCP config baked into image at build time
 
 ### entrypoint.sh startup sequence:
-1. `claude mcp add fileserver --scope user -- mcp-watchdog --verbose -- python /app/files_mcp.py`
-2. Verify .claude.json was written
-3. Lock .claude.json to 440
-4. exec python /app/server.py
+1. Run `verify_isolation.py claude-server` — exits non-zero on any violation
+2. `exec python /app/server.py`
+
+MCP config is no longer registered at runtime. The .mcp.json file is written during
+`docker build` and passed to Claude Code via the `--mcp-config` flag.
 
 ### server.py subprocess call:
 ```python
 subprocess.run(
     ["claude", "--print", "--dangerously-skip-permissions",
-     "--output-format", "json", "--model", request.model,
-     "--system-prompt", "You have access to a workspace through MCP fileserver tools. Always use MCP tools to read, write, list and delete files. Never access the local filesystem directly.",
-     request.query],
+     "--output-format", "json",
+     "--mcp-config", "/home/appuser/sandbox/.mcp.json",
+     "--model", request.model,
+     "--system-prompt", SYSTEM_PROMPT,
+     "--", request.query],
     capture_output=True,
     text=True,
     timeout=120,
@@ -175,9 +187,16 @@ subprocess.run(
         **os.environ,
         "CLAUDE_CONFIG_DIR": "/home/appuser",
         "HOME": "/home/appuser",
+        "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
     }
 )
 ```
+
+Key details:
+- DYNAMIC_AGENT_KEY is renamed to ANTHROPIC_API_KEY only in the subprocess scope
+- `--mcp-config` explicitly loads MCP servers (Claude Code --print mode doesn't auto-discover config)
+- `--` separates flags from the query (--mcp-config is variadic)
+- SYSTEM_PROMPT is defined in runenv.py as a shared constant
 
 ### files_mcp.py — MCP stdio server
 - Wraps Go REST endpoints via requests
@@ -185,6 +204,7 @@ subprocess.run(
 - Errors raised as exceptions (FileNotFoundError, PermissionError, RuntimeError)
 - call_tool returns CallToolResult with isError=True/False — proper MCP protocol error typing
 - Never returns error strings as normal text responses
+- Does NOT run verify_isolation.py — Claude Code passes ANTHROPIC_API_KEY to child processes, which would false-positive
 
 ### MCP server (Go, main.go)
 - Plain REST API: /read /write /create /remove /list
@@ -192,30 +212,59 @@ subprocess.run(
 - os.OpenRoot jail at /workspace
 - Bearer token auth on every endpoint
 - TLS with internal CA cert
+- entrypoint.sh checks: no ANTHROPIC_API_KEY, no CLAUDE_API_TOKEN, no DYNAMIC_AGENT_KEY, requires MCP_API_TOKEN
 
 ### Authentication tokens:
 - ANTHROPIC_API_KEY — real key, only in .secrets.env, only seen by proxy container
-- DYNAMIC_AGENT_KEY — ephemeral, generated by run.sh, used by claude-server as its "API key" to proxy
-- AGENT_API_TOKEN — ephemeral, generated by run.sh, validates ingress requests
+- DYNAMIC_AGENT_KEY — ephemeral, generated by run.sh, passed to claude-server and proxy
+  - claude-server renames it to ANTHROPIC_API_KEY in subprocess scope only
+  - proxy uses it as the virtual key for LiteLLM validation
+- CLAUDE_API_TOKEN — ephemeral, generated by run.sh, validates ingress requests at FastAPI level
 - MCP_API_TOKEN — ephemeral, generated by run.sh, authenticates claude-server to mcp-server
+
+### Token isolation matrix:
+
+| Token | claude-server | proxy | mcp-server | caddy |
+| :--- | :--- | :--- | :--- | :--- |
+| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden |
+
+---
+
+## Isolation Checks (verify_isolation.py)
+
+Runtime checks that run at container startup. Fail hard (sys.exit(1)) on any violation.
+
+### What each role checks:
+- **Forbidden env vars** — tokens that should never be in this container
+- **Required env vars** — tokens this container needs to function
+- **Forbidden paths** — secrets, parent repo artifacts, cross-container code
+- **Required paths** — expected files that confirm correct image build
+- **.env file scan** — walks directories looking for any .env files
+- **Workspace whitelist** (mcp-server only) — /workspace must contain only agent code
+- **.git parent leak** (mcp-server only) — submodule .git must not point outside /workspace
+- **MCP config validation** (claude-server only) — .mcp.json must exist with correct structure
+
+### Important: never call from MCP subprocess children
+verify_isolation.py must only run at entrypoint/daemon level. Claude Code passes
+ANTHROPIC_API_KEY to its child processes (MCP servers), which would false-positive
+the forbidden env var check.
 
 ---
 
 ## Test Suite (test.sh)
 
 Runs in order:
-1. Caddy config validation (caddy_test.sh)
-2. Go unit tests (go test)
-3. Python unit tests (pytest claude_tests.py files_mcp_test.py)
-4. pip-audit (Python CVE scan)
-5. govulncheck (Go CVE scan)
-6. hadolint (Dockerfile linting)
-7. trivy (docker-compose misconfiguration scan)
-8. docker compose build
-9. Integration: start cluster, check MCP registration, check MCP health
-10. Integration: auth failure check (expect 401 with wrong token)
-11. Integration: success check (expect 200 with correct token)
-12. docker compose down
+1. Dependency security scans (govulncheck, pip-audit, hadolint, trivy)
+2. Caddy config validation (caddy_test.sh)
+3. Go unit tests (go test)
+4. Python unit tests (pytest claude_tests.py files_mcp_test.py test_isolation.py)
+5. Docker build (--quiet)
+6. Integration: start cluster, check .mcp.json, check MCP health
+7. Integration: auth failure check (expect 401 with wrong token)
+8. Teardown
 
 ---
 
@@ -223,12 +272,15 @@ Runs in order:
 
 - Full query loop: query.sh → Caddy → FastAPI → Claude Code → mcp-watchdog → files_mcp.py → Go REST → /workspace
 - Claude Code reads/writes/lists/deletes files in /workspace exclusively via MCP tools
+- MCP config passed explicitly via --mcp-config flag (no auto-discovery dependency)
 - mcp-watchdog intercepts all JSON-RPC traffic as security proxy
 - Credential isolation confirmed: agent never sees real ANTHROPIC_API_KEY
+- DYNAMIC_AGENT_KEY renamed to ANTHROPIC_API_KEY only in subprocess scope
 - Repo isolation confirmed: agent submodule contains only application code, no secrets or infrastructure
 - TLS working on all internal connections
 - Token auth working on ingress and MCP endpoints
-- Unit tests passing for FastAPI server and MCP tools
+- Runtime isolation checks on all 4 containers (startup fail-hard)
+- Unit tests passing for FastAPI server, MCP tools, and isolation checks
 - Pro subscription OAuth token works as ANTHROPIC_API_KEY (sk-ant-oat01-...)
 
 ---
@@ -244,5 +296,10 @@ Runs in order:
 | Submodule count | Single submodule (agent) | Multiple (agent, mcp, tools) | claude/ and fileserver/ are tightly coupled; future tools share same coupling |
 | Dockerfile location | Parent repo (cluster/) | Inside submodule | Dockerfiles need certs/ at build time; also keeps agent from modifying its own container |
 | Test isolation | Per-language containers | Shared test runner | Mount boundary enforces scope structurally |
-| Config locking | chmod 440 on .claude.json | Directory chmod 550 | Directory lock prevents Claude Code writing session state |
 | Credential flow | OAuth token (sk-ant-oat01-) | API key | Pro subscription, no per-token billing |
+| MCP config delivery | --mcp-config flag + build-time .mcp.json | claude mcp add at runtime | --print mode doesn't auto-discover config; claude mcp add writes to unpredictable locations across versions |
+| Config locking | .mcp.json read-only in locked sandbox (500) | chmod 440 on .claude.json | .claude.json needs write access for Claude Code session state; separate .mcp.json avoids conflict |
+| Claude Code version | Pinned @2.1.74 | Latest | Config resolution, MCP loading, and flag behavior change between versions |
+| Credential rename | DYNAMIC_AGENT_KEY in env, renamed in subprocess | ANTHROPIC_API_KEY in env | Allows isolation check to detect real key leaks; rename scoped to subprocess only |
+| System prompt location | Shared constant in runenv.py | Hardcoded in server.py | Single source of truth; tests reference same constant |
+| Isolation check scope | Entrypoint only, never in MCP children | All processes | Claude Code passes ANTHROPIC_API_KEY to child MCP servers, causing false positives |
