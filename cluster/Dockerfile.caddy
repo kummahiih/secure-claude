@@ -35,8 +35,12 @@ RUN chmod 644 /etc/caddy/certs/caddy.crt && \
     chmod 600 /etc/caddy/certs/caddy.key && \
     chmod 644 /etc/caddy/certs/ca.crt
 
+COPY --chown=caddyuser:caddygroup caddy/caddy_entrypoint.sh /usr/local/bin/caddy_entrypoint.sh
+RUN chmod +x /usr/local/bin/caddy_entrypoint.sh
 # 4. Switch to the non-root user
+
 USER caddyuser
+ENTRYPOINT ["/usr/local/bin/caddy_entrypoint.sh"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q --spider --no-check-certificate https://localhost:8443/ || exit 1

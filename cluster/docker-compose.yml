@@ -36,8 +36,6 @@ services:
     environment:
       # secrets from the env
       - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}
-      - MCP_API_TOKEN=${MCP_API_TOKEN}
-      - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - HOST_DOMAIN=${HOST_DOMAIN}
       # litellm env variables
