@@ -32,10 +32,13 @@ COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
 
 RUN chmod 600 /app/certs/mcp.key
 
+COPY --chown=appuser:appgroup agent/fileserver/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 USER appuser
 EXPOSE 8443
 # Ensure your Go binary is configured to use these paths for its TLS config
-CMD ["./mcp-server"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 HEALTHCHECK --interval=1m --timeout=5s \
   CMD pgrep -f "mcp-server" || exit 1
