@@ -16,7 +16,19 @@ export DYNAMIC_AGENT_KEY="dummy-dynaic-key"
 
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/6: Running Dependency Security Scans..."
+echo "[$(date +'%H:%M:%S')] 1/7: Validating Caddy Edge Router..."
+(bash ./cluster/caddy/caddy_test.sh 2>&1 | tail -3)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 2/7: Running Golang MCP Server Tests..."
+(cd cluster/agent/fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 3/7: Running Python Claude Tests..."
+(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 4/7: Running Dependency Security Scans..."
 
 echo "[+] Scanning Go Fileserver (govulncheck)..."
 (cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | tail -5)
@@ -44,26 +56,34 @@ TRIVY_OUT=$(cd cluster && docker run --rm -v "$(pwd)":/app -w /app aquasec/trivy
 if [ $? -eq 0 ]; then echo "  ✅ Infrastructure config clean"; else echo "$TRIVY_OUT" | grep -E '(CRITICAL|HIGH|MEDIUM|FAIL)'; EXIT_CODE=1; fi
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/6: Validating Caddy Edge Router..."
-(bash ./cluster/caddy/caddy_test.sh 2>&1 | tail -3)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
-(cd cluster/agent/fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/6: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 5/6: Preparing & Building Containers..."
-echo "[$(date +'%H:%M:%S')] Building containers (this may take a while)..."
+echo "[$(date +'%H:%M:%S')] 5/7: Building Containers..."
 (cd cluster && docker-compose build --quiet)
-
 echo "  ✅ Build complete"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 6/6: Running Docker Integration Tests..."
+echo "[$(date +'%H:%M:%S')] 6/7: Post-Build Security Scans..."
+
+echo "[+] Scanning Claude Code JS deps (npm audit)..."
+(
+  set +e
+  TMPDIR=$(mktemp -d)
+  docker create --name npm-audit-tmp cluster-claude-server >/dev/null 2>&1
+  docker cp npm-audit-tmp:/usr/lib/node_modules/@anthropic-ai/claude-code "$TMPDIR/claude-code" 2>/dev/null
+  docker rm npm-audit-tmp >/dev/null 2>&1
+  NPM_OUT=$(cd "$TMPDIR/claude-code" && npm i --package-lock-only --ignore-scripts 2>/dev/null && npm audit --omit=dev 2>&1) || true
+  rm -rf "$TMPDIR"
+  if echo "$NPM_OUT" | grep -q "found 0 vulnerabilities"; then
+    echo "  ✅ npm audit clean"
+  elif [ -z "$NPM_OUT" ]; then
+    echo "  ⚠️  npm audit produced no output"
+  else
+    echo "  ⚠️  npm audit:"
+    echo "$NPM_OUT" | grep -E '(found|vulnerabilities|severity|Severity)' | tail -5
+  fi
+) || echo "  ⚠️  npm audit section failed"
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 7/7: Running Docker Integration Tests..."
 
 # Launch the stack
 (./cluster/start-cluster.sh 2>&1 | tail -3)
@@ -78,6 +98,16 @@ else
   echo "  ❌ MCP fileserver not registered"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking MCP fileserver logs..."
+MCP_ERRORS=$(docker exec claude-server sh -c \
+  'find /home/appuser/.cache/claude-cli-nodejs -path "*mcp-logs-fileserver*" -name "*.jsonl" 2>/dev/null | sort | tail -1 | xargs cat 2>/dev/null | grep -i error' 2>/dev/null || true)
+if [ -n "$MCP_ERRORS" ]; then
+  echo "  ⚠️  MCP fileserver errors detected:"
+  echo "$MCP_ERRORS" | head -5
+else
+  echo "  ✅ MCP fileserver logs clean"
 fi
 
 echo "[$(date +'%H:%M:%S')] Checking auth failure on Caddy endpoint..."
