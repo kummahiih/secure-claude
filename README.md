@@ -208,6 +208,7 @@ The full test suite runs automatically with ./test.sh and covers:
 | go test | Unit tests | agent/fileserver/ Go MCP server |
 | pip-audit | CVE scanning | agent/claude/requirements.txt |
 | govulncheck | CVE scanning | agent/fileserver/ Go modules |
+| npm audit | CVE scanning | Claude Code JS dependencies (post-build) |
 | hadolint | Dockerfile linting | All Dockerfile.* |
 | trivy | Misconfiguration | docker-compose.yml + images |
 

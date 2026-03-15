@@ -42,6 +42,9 @@ The foundation. Everything else depends on this.
 - [x] Remove `claude mcp add` from entrypoint (replaced by build-time .mcp.json)
 - [x] Fix docker-compose.yml: stop passing MCP_API_TOKEN and CLAUDE_API_TOKEN to proxy
 - [x] Update test.sh: reduced verbosity, updated MCP registration check
+- [x] Add npm audit to test.sh: post-build scan of Claude Code JS deps (lockfile generated from image, audited on host)
+- [x] Add MCP fileserver log check to test.sh integration tests
+- [x] Update logs.sh: include Claude Code's internal MCP fileserver logs
 - [x] Verify /workspace contains only agent code (via verify_isolation.py workspace whitelist)
 - [x] Verify .git doesn't leak parent repo info (via verify_isolation.py gitfile check)
 

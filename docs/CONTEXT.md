@@ -257,14 +257,21 @@ the forbidden env var check.
 ## Test Suite (test.sh)
 
 Runs in order:
-1. Dependency security scans (govulncheck, pip-audit, hadolint, trivy)
-2. Caddy config validation (caddy_test.sh)
-3. Go unit tests (go test)
-4. Python unit tests (pytest claude_tests.py files_mcp_test.py test_isolation.py)
+1. Caddy config validation (caddy_test.sh)
+2. Go unit tests (go test)
+3. Python unit tests (pytest claude_tests.py files_mcp_test.py test_isolation.py)
+4. Pre-build security scans (govulncheck, pip-audit, hadolint, trivy)
 5. Docker build (--quiet)
-6. Integration: start cluster, check .mcp.json, check MCP health
-7. Integration: auth failure check (expect 401 with wrong token)
-8. Teardown
+6. Post-build security scans (npm audit — lockfile generated from built image, audited on host)
+7. Integration: start cluster, check .mcp.json, check MCP fileserver logs for errors
+8. Integration: auth failure check (expect 401 with wrong token)
+9. Teardown
+
+### logs.sh
+
+Tails all container logs plus Claude Code's internal MCP fileserver logs from
+`/home/appuser/.cache/claude-cli-nodejs/*/mcp-logs-fileserver/`. These logs are
+where MCP server startup failures appear (not in docker-compose logs).
 
 ---
 
