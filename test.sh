@@ -56,7 +56,7 @@ echo "[$(date +'%H:%M:%S')] 2/6: Running Golang MCP Server Tests..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 3/6: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py -v)
+(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py -v)
 
 
 echo "----------------------------------------"
