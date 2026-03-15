@@ -70,7 +70,7 @@ services:
     container_name: claude-server
     user: "1000:1000"
     environment:
-      - ANTHROPIC_API_KEY=${DYNAMIC_AGENT_KEY}      
+      - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}      
       - ANTHROPIC_BASE_URL=https://proxy:4000        
       - MCP_API_TOKEN=${MCP_API_TOKEN}
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
