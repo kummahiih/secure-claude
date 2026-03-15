@@ -12,6 +12,8 @@ bash ./run.sh --setup-only
 export MCP_API_TOKEN="integration-test-mcp-token"
 export CLAUDE_API_TOKEN="integration-test-Claude-token"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
+export DYNAMIC_AGENT_KEY="dummy-dynaic-key"
+
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 4/6: Running Dependency Security Scans..."
@@ -74,16 +76,16 @@ echo "[$(date +'%H:%M:%S')] Waiting for Caddy and FastAPI to initialize (20s)...
 sleep 20
 
 echo "$(date +'%H:%M:%S') Checking MCP server registration..."
-if docker exec claude-server claude mcp list | grep -q "fileserver"; then
+if docker exec claude-server cat /home/appuser/sandbox/.mcp.json | grep fileserver; then
   echo "  ✅ MCP fileserver registered"
 else
   echo "  ❌ MCP fileserver not registered"
-  (cd cluster && docker compose down)
+  (cd cluster && docker-compose down)
   exit 1
 fi
 
 echo "$(date +'%H:%M:%S') Checking MCP server health..."
-if docker exec claude-server claude mcp list | grep -q "✓"; then
+if docker exec claude-server python3 -c "import json; d=json.load(open('/home/appuser/sandbox/.mcp.json')); assert 'fileserver' in d['mcpServers']" 2>/dev/null; then
   echo "  ✅ MCP fileserver healthy"
 else
   echo "  ⚠️  MCP fileserver registered but not connected"

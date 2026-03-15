@@ -50,9 +50,25 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.74
 RUN mkdir -p /home/appuser/.claude && \
     chown -R appuser:appgroup /home/appuser
 
+RUN mkdir -p /home/appuser/sandbox && chown appuser:appgroup /home/appuser/sandbox
+
 RUN mkdir -p /home/appuser/sandbox && \
     chown appuser:appgroup /home/appuser/sandbox && \
-    chmod 500 /home/appuser/sandbox  # read+execute only, nothing can be created in it
+    chmod 500 /home/appuser/sandbox
+
+# Write MCP config at build time — it's static, not a secret
+COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
+{
+  "mcpServers": {
+    "fileserver": {
+      "type": "stdio",
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python", "/app/files_mcp.py"],
+      "env": {}
+    }
+  }
+}
+EOF
 
 # Copy Certificates from the Signer stage
 # We take the leaf cert, the leaf key, and the public CA cert
