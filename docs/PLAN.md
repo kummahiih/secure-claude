@@ -70,31 +70,65 @@ The foundation. Everything else depends on this.
 
 ---
 
-## Phase 2: Git MCP Tools (Day 4, ~6–8 hours)
+## Phase 2: Git MCP Tools + Docs Access (Day 4–5) ✅ COMPLETE
 
 ### Tasks
 
-- [ ] Create `cluster/agent/claude/git_mcp.py` — MCP stdio server for git operations
-  - Follow same pattern as `files_mcp.py`: subprocess calls, structural directory lock
-  - Tools: `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`
-  - Working directory locked to mount point (not path filtering)
-- [ ] Add git MCP server to .mcp.json (build-time, in Dockerfile.claude)
-- [ ] Register in --mcp-config alongside fileserver tools (through mcp-watchdog)
-- [ ] Write `git_mcp_test.py` with temporary git repo fixture
-- [ ] Verify via test query that Claude sees both fileserver and git tool sets
+- [x] Create `cluster/agent/claude/git_mcp.py` — MCP stdio server for git operations
+  - Tools: `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`, `git_reset_soft`
+  - Every git subprocess call uses `-c core.hooksPath=/dev/null` (structural hook prevention)
+  - `--no-verify` on commits (belt-and-suspenders)
+  - Working directory locked via GIT_DIR and GIT_WORK_TREE env vars
+- [x] Add git MCP server to .mcp.json (build-time, in Dockerfile.claude)
+- [x] Register in --mcp-config alongside fileserver tools (through mcp-watchdog)
+- [x] Write `git_mcp_test.py` with temporary git repo fixture (25 tests)
+- [x] Verify via test query that Claude sees both fileserver and git tool sets
+- [x] Implement `git_reset_soft` with baseline commit floor
+- [x] Fix baseline capture: set GIT_BASELINE_COMMIT in entrypoint.sh (survives subprocess respawns)
+- [x] Add git to Dockerfile.claude (pinned git=1:2.47.3-0+deb13u1)
+- [x] Create `cluster/agent/claude/docs_mcp.py` — read-only MCP server for /docs
+  - Tools: `list_docs`, `read_doc`
+  - Mounted read-only from parent repo's docs/ directory
+- [x] Add docs MCP server to .mcp.json
+- [x] Update docker-compose.yml with docs mount
 
-### Design Decisions
+### Git Hook Prevention (structural, 3 layers)
 
-- No `git_push` for now — requires network access and GitHub credentials, which is a
-  separate isolation problem. Commits stay local; human pushes.
-- The mounted submodule directory must have `.git` available inside the container,
-  but the parent repo's `.git` must not be reachable.
-- git_mcp.py must NOT call verify_isolation.py (same child process issue as files_mcp.py)
+- mcp-server: /dev/null bind-mount shadows .git file — fileserver can't see or write git data
+- claude-server: gitdir mounted separately at /gitdir — filesystem MCP can't reach hooks
+- git_mcp.py: core.hooksPath=/dev/null + --no-verify on every call — git ignores hooks
 
-### Acceptance Criteria
+### Volume Mount Design
 
-Claude can run `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log` through
-MCP tools. Unit tests pass with a temporary git repo fixture.
+- `./workspace` (symlink → `./agent`) on mcp-server: writable, .git shadowed with /dev/null
+- `./workspace` on claude-server: read-only (writes go through MCP fileserver)
+- `../.git/modules/cluster/agent` on claude-server as /gitdir: writable (for git add/commit)
+- `../docs` on claude-server as /docs: read-only
+
+### Baseline Commit Floor
+
+- Captured once in entrypoint.sh at container startup via `git rev-parse HEAD`
+- Exported as GIT_BASELINE_COMMIT env var — inherited by all Claude Code subprocesses
+- git_reset_soft allows resetting TO the baseline but not past it
+- Prevents agent from erasing pre-existing git history
+- Each container restart captures a new baseline
+
+### Key Bugs Found and Fixed
+
+- Submodule .git is a file (not directory) — can't mount Docker volume over it; use /dev/null bind-mount
+- Git gitdir mount must point to ../.git/modules/cluster/agent (resolved path), not ./workspace/.git
+- git init --separate-git-dir fails inside nested repos — use GIT_DIR env var for test fixtures
+- Module-level baseline capture resets on every /ask query — moved to entrypoint.sh env var
+- merge-base --is-ancestor check: resetting TO baseline must be allowed (not just past it)
+- Hadolint requires pinned git version in Dockerfile
+
+### Decisions Made During Phase 2
+
+- No `git_push` — requires network access and GitHub credentials, separate isolation problem
+- git_mcp.py runs inside claude-server (not separate container) — simplifies mount topology
+- --soft reset only, max 5 commits — minimizes data loss risk
+- Baseline stored as env var, not module global — survives subprocess respawns
+- Docs mounted read-only on claude-server only — agent can read guidance, not modify docs
 
 ---
 
@@ -175,6 +209,8 @@ all without human intervention.
 | ~~Submodule `.git` leaks parent repo info~~ | ~~Security gap~~ | ~~Low~~ | ✅ Resolved — verify_isolation.py checks gitfile target |
 | ~~Claude Code --print mode doesn't load MCP config~~ | ~~Blocks MCP tools~~ | ~~High~~ | ✅ Resolved — --mcp-config flag + build-time .mcp.json |
 | ~~verify_isolation.py false-positives in MCP children~~ | ~~MCP server crashes~~ | ~~High~~ | ✅ Resolved — only run at entrypoint, never in subprocess children |
+| ~~Git hooks as escape vector~~ | ~~Arbitrary code execution~~ | ~~Medium~~ | ✅ Resolved — 3 structural layers (shadow mount, separated gitdir, hooksPath) |
+| ~~Baseline resets on every query~~ | ~~Reset protection useless~~ | ~~High~~ | ✅ Resolved — baseline captured in entrypoint.sh, passed as env var |
 | Test runner Docker socket access creates escape vector | Security gap | Medium | Document, consider rootless Docker or Sysbox |
 | Integration debugging takes longer than estimated | Schedule slip | High | Phases 1–3 are the priority; Phase 5 is buffer |
 | Claude Code doesn't handle MCP tool errors gracefully | Poor agentic loop | Medium | Test error paths explicitly in Phase 4 |

@@ -9,6 +9,10 @@ Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
      └─> claude-server:8000 (FastAPI + Claude Code)
           ├─> proxy:4000 (LiteLLM) ──> Anthropic API
+          ├─> MCP stdio servers (inside claude-server):
+          │    ├─> files_mcp.py → HTTPS REST → mcp-server:8443
+          │    ├─> git_mcp.py   → git subprocess (/gitdir)
+          │    └─> docs_mcp.py  → local read (/docs)
           └─> mcp-server:8443 (Go REST, os.OpenRoot jail)
                └─> /workspace (bind mount → cluster/agent/)
 ```
@@ -18,9 +22,19 @@ Host / Network
 | Service | Image | Network(s) | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | caddy-sidecar | Dockerfile.caddy | ext_net, int_net | 8443 | TLS termination & reverse proxy |
-| claude-server | Dockerfile.claude | int_net | - | FastAPI + Claude Code agent |
+| claude-server | Dockerfile.claude | int_net | - | FastAPI + Claude Code agent + 3 MCP stdio servers |
 | proxy | Dockerfile.proxy | ext_net, int_net | - | LiteLLM gateway to Anthropic |
 | mcp-server | Dockerfile.mcp | int_net | - | Go filesystem tool server |
+
+### MCP Tool Sets
+
+The agent has access to three tool sets via MCP, all wrapped by mcp-watchdog:
+
+| Tool Set | Tools | Purpose |
+| :--- | :--- | :--- |
+| **fileserver** | read, list, create, write, delete | File operations in /workspace via Go REST server |
+| **git** | status, diff, add, commit, log, reset_soft | Git operations with hook prevention and history protection |
+| **docs** | list_docs, read_doc | Read-only access to project documentation |
 
 ---
 
@@ -38,23 +52,29 @@ All JSON-RPC traffic between Claude Code and the MCP fileserver passes through m
 ### 4. Filesystem Jail
 The Go MCP server uses os.OpenRoot to jail all file operations to /workspace. Directory traversal attacks (e.g. ../../etc/passwd) are blocked at the Go runtime level.
 
-### 5. Network Isolation
+### 5. Git Hook Prevention
+Git hooks are an escape vector — writing to `.git/hooks/` enables arbitrary code execution. Three structural layers prevent this: a /dev/null bind-mount shadows .git on the fileserver (so filesystem MCP can't write hooks), the git data directory is mounted separately from the worktree (so filesystem MCP can't reach it), and every git subprocess call uses `core.hooksPath=/dev/null` plus `--no-verify`.
+
+### 6. Git History Protection
+A baseline commit is captured at container startup and exported as an environment variable. The `git_reset_soft` tool allows the agent to undo its own commits but cannot reset past the baseline — pre-existing history is always protected.
+
+### 7. Network Isolation
 The agent runs on int_net only - an internal Docker bridge with no internet access. Only the LiteLLM proxy and Caddy have ext_net access for outbound API calls and inbound queries respectively.
 
-### 6. Repo Isolation
+### 8. Repo Isolation
 Agent source code lives in a separate git submodule (secure-claude-agent) mounted as /workspace. The parent repo containing Dockerfiles, certificates, secrets, and infrastructure config is never visible to the agent. This is a structural boundary, not path filtering.
 
-### 7. Dual-Layer Authentication
+### 9. Dual-Layer Authentication
 - Ingress: FastAPI validates CLAUDE_API_TOKEN on every request
 - Internal: Claude Code authenticates to the MCP server with a separate MCP_API_TOKEN
 
-### 8. TLS Everywhere
+### 10. TLS Everywhere
 All internal service-to-service communication uses HTTPS with a shared internal CA. No plaintext traffic on any network and server identity should be strong.
 
-### 9. MCP Config as Build Artifact
+### 11. MCP Config as Build Artifact
 The MCP server configuration (.mcp.json) is baked into the image at build time and passed to Claude Code via the --mcp-config flag. The agent cannot modify its own tool registrations. Claude Code version is pinned to prevent config resolution changes across versions.
 
-### 10. Non-Root Containers
+### 12. Non-Root Containers
 All containers run as non-root users (UID 1000). cap_drop: ALL is set on the proxy container.
 
 ---
@@ -74,19 +94,23 @@ Orchestration, infrastructure, secrets. Never mounted into containers as /worksp
 │   │   ├── claude/
 │   │   │   ├── server.py           # FastAPI server, Claude Code subprocess
 │   │   │   ├── files_mcp.py        # MCP stdio server wrapping Go REST API
-│   │   │   ├── entrypoint.sh       # Isolation check + starts server
+│   │   │   ├── git_mcp.py          # MCP stdio server for git operations
+│   │   │   ├── docs_mcp.py         # MCP stdio server for read-only docs access
+│   │   │   ├── entrypoint.sh       # Isolation check + baseline capture + starts server
 │   │   │   ├── runenv.py           # Env var validation + SYSTEM_PROMPT
 │   │   │   ├── verify_isolation.py # Runtime isolation checks (all 4 roles)
 │   │   │   ├── test_isolation.py   # Unit tests for isolation checks
 │   │   │   ├── setuplogging.py     # Logging configuration
 │   │   │   ├── requirements.txt    # Python dependencies
 │   │   │   ├── claude_tests.py     # FastAPI unit tests
-│   │   │   └── files_mcp_test.py   # MCP tool unit tests
+│   │   │   ├── files_mcp_test.py   # MCP tool unit tests
+│   │   │   └── git_mcp_test.py     # Git MCP tool unit tests
 │   │   └── fileserver/
 │   │       ├── main.go             # Go MCP REST server with os.OpenRoot jail
 │   │       ├── entrypoint.sh       # Isolation check + starts Go server
 │   │       ├── mcp_test.go         # Go unit tests
 │   │       └── go.mod              # Go module dependencies
+│   ├── workspace                   ← symlink → agent/ (used by docker-compose mounts)
 │   ├── caddy/
 │   │   ├── caddy_entrypoint.sh     # Isolation check + starts Caddy
 │   │   ├── Caddyfile               # TLS and reverse proxy config
@@ -182,7 +206,8 @@ This generates internal TLS certificates, rotates all tokens, and starts all fou
 ```bash
 ./query.sh claude-sonnet-4-6 "list the files in my workspace"
 ./query.sh claude-sonnet-4-6 "create a file called hello.py with a hello world function"
-./query.sh claude-sonnet-4-6 "read hello.py"
+./query.sh claude-sonnet-4-6 "run git status and git log"
+./query.sh claude-sonnet-4-6 "read CONTEXT.md from the docs"
 ```
 
 ---
@@ -204,7 +229,7 @@ The full test suite runs automatically with ./test.sh and covers:
 
 | Tool | Focus | Target |
 | :--- | :--- | :--- |
-| pytest | Unit tests | agent/claude/ Python server, MCP tools, isolation checks |
+| pytest | Unit tests | agent/claude/ Python server, MCP tools, isolation checks, git tools |
 | go test | Unit tests | agent/fileserver/ Go MCP server |
 | pip-audit | CVE scanning | agent/claude/requirements.txt |
 | govulncheck | CVE scanning | agent/fileserver/ Go modules |
@@ -234,6 +259,18 @@ Or edit docker-compose.yml to point the mcp-server workspace volume at your proj
 volumes:
   - /your/project:/workspace
 ```
+
+---
+
+## Development Status
+
+See [docs/PLAN.md](docs/PLAN.md) for the full development roadmap.
+
+- **Phase 1** ✅ Git submodule split + isolation verification
+- **Phase 2** ✅ Git MCP tools + docs access + hook prevention
+- **Phase 3** 🔲 Test runner MCP tool
+- **Phase 4** 🔲 Close the agentic loop (self-developing cycle)
+- **Phase 5** 🔲 Hardening and polish
 
 ---
 
