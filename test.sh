@@ -25,7 +25,7 @@ echo "[$(date +'%H:%M:%S')] 2/7: Running Golang MCP Server Tests..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 3/7: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 4/7: Running Dependency Security Scans..."
