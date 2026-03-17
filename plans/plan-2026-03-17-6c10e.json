@@ -1,7 +1,7 @@
 {
   "id": "plan-20260317-122848",
   "goal": "Add input validation to the /read endpoint in the Go fileserver (main.go) before the filesystem call, without changing the existing query-parameter API contract.",
-  "status": "in_progress",
+  "status": "completed",
   "created": "2026-03-17T12:28:48.390022+00:00",
   "tasks": [
     {
@@ -24,7 +24,7 @@
       "action": "In mcp_test.go, add test cases that exercise the three new validation paths for the /read endpoint: (1) a request with no `file_path` parameter returns 400; (2) a request where `file_path` contains a null byte returns 400; (3) a request where `file_path` is a 4097-byte string returns 400. Keep all existing tests passing. Follow the naming and structure conventions already used in the file.",
       "verify": "Run `go test ./...` inside fileserver/ \u2014 all tests (existing + new) must pass with exit code 0.",
       "done": "go test reports PASS and the three new test cases are present in mcp_test.go.",
-      "status": "current"
+      "status": "completed"
     }
   ]
 }
