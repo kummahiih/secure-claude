@@ -73,6 +73,7 @@ services:
       - MCP_API_TOKEN=${MCP_API_TOKEN}
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - MCP_SERVER_URL=https://mcp-server:8443
+      - PLAN_SERVER_URL=https://plan-server:8443
       - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt        # for Node.js/Claude Code
       - CURL_CA_BUNDLE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
@@ -88,7 +89,8 @@ services:
       - int_net
     depends_on:
       - mcp-server
-      - proxy  # Added dependency to ensure the proxy boots first
+      - plan-server
+      - proxy
     restart: unless-stopped
 
   mcp-server:
@@ -103,6 +105,22 @@ services:
     volumes:
       - ./workspace:/workspace
       - /dev/null:/workspace/.git:ro  # Shadow .git file — structural hook prevention
+    networks:
+      - int_net
+    restart: unless-stopped
+
+  plan-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.plan
+    container_name: plan-server
+    user: "1000:1000"
+    environment:
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - SSL_CERT_FILE=/app/certs/ca.crt
+      - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
+    volumes:
+      - ../plans:/plans
     networks:
       - int_net
     restart: unless-stopped

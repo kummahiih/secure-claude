@@ -1,3 +1,6 @@
 [submodule "cluster/agent"]
 	path = cluster/agent
 	url = https://github.com/kummahiih/secure-claude-agent
+[submodule "cluster/planner"]
+	path = cluster/planner
+	url = https://github.com/kummahiih/secure-claude-planner

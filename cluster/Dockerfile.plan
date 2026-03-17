@@ -1,0 +1,64 @@
+# Stage 1: Certificate Signer
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Mount CA from host to sign the plan-server cert
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out plan.key 2048 && \
+    openssl req -new -key plan.key -out plan.csr -subj "/CN=plan-server" && \
+    echo "subjectAltName=DNS:plan-server,DNS:localhost,IP:127.0.0.1" > plan.ext && \
+    openssl x509 -req -in plan.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out plan.crt -days 365 -sha256 -extfile plan.ext
+
+# Stage 2: Final Image
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+USER root
+
+# Create non-root user (UID 1000)
+RUN addgroup --gid 1000 appgroup && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY planner/planner/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Copy certificates
+COPY --from=signer --chown=appuser:appgroup /certs/plan.crt /app/certs/plan.crt
+COPY --from=signer --chown=appuser:appgroup /certs/plan.key /app/certs/plan.key
+COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
+
+# Trust the CA at the Python level
+RUN cat /app/certs/ca.crt >> "$(python -c 'import certifi; print(certifi.where())')" && \
+    cp /app/certs/ca.crt /usr/local/share/ca-certificates/internal-ca.crt && \
+    update-ca-certificates
+
+RUN chmod 600 /app/certs/plan.key
+
+# Copy server code
+COPY --chown=appuser:appgroup planner/planner/plan_server.py /app/plan_server.py
+
+# Lock down /app
+RUN chmod -R 550 /app && \
+    chmod 440 /app/certs/ca.crt && \
+    chmod 400 /app/certs/plan.key && \
+    chown -R appuser:appgroup /app
+
+# Create /plans directory (will be overridden by volume mount)
+RUN mkdir -p /plans && chown appuser:appgroup /plans
+
+USER appuser
+EXPOSE 8443
+
+CMD ["python", "/app/plan_server.py"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "python" || exit 1

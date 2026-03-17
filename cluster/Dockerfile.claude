@@ -72,7 +72,11 @@ COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
     "docs": {
       "command": "mcp-watchdog",
       "args": ["--verbose", "--", "python3", "/app/docs_mcp.py"]
-    }
+    },
+     "planner": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/plan_mcp.py"]
+     }
   }
 }
 EOF
@@ -94,6 +98,7 @@ RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 # Copy the server script and enforce correct ownership
 COPY --chown=appuser:appgroup agent/claude/*.py .
 COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
+COPY --chown=appuser:appgroup planner/planner/plan_mcp.py /app/plan_mcp.py
 
 # Lock down /app - readable but not writable by appuser
 RUN chmod -R 550 /app && \
