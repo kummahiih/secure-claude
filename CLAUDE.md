@@ -8,15 +8,20 @@ See docs/CONTEXT.md for full architecture, security model, and implementation de
 ## Key Commands
 - `./run.sh` — generate certs/tokens, start cluster
 - `./test.sh` — full test suite (unit + security + integration)
-- `./query.sh <model> "<query>"` — send query to agent
+- `./plan.sh <model> "<goal>"` — create a plan (no code execution)
+- `./query.sh <model> "<query>"` — send query / execute current task
 - `./logs.sh` — tail container logs
 
 ## Project Structure
-- `cluster/` — all container source code
+- `cluster/agent/` — agent submodule (code the agent modifies)
+- `cluster/planner/` — planner submodule (plan state management)
+- `plans/` — JSON plan files (committed)
 - Root scripts — touch secrets/Docker, never mounted as /workspace
 
-## Current Goal
-Self-developing agentic loop. See "Next Steps" in docs/CONTEXT.md.
+## Workflow
+1. `plan.sh` creates a structured plan (2-5 tasks)
+2. `query.sh "work on the current task"` executes one task at a time
+3. Claude commits after each task, advances to the next automatically
 
 ## Planning
-See docs/PLAN.md for the current 2-week development plan.
+See docs/PLAN.md for the development roadmap.
