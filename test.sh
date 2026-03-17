@@ -16,19 +16,23 @@ export DYNAMIC_AGENT_KEY="dummy-dynaic-key"
 
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/7: Validating Caddy Edge Router..."
+echo "[$(date +'%H:%M:%S')] 1/8: Validating Caddy Edge Router..."
 (bash ./cluster/caddy/caddy_test.sh 2>&1 | tail -3)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/7: Running Golang MCP Server Tests..."
+echo "[$(date +'%H:%M:%S')] 2/8: Running Golang MCP Server Tests..."
 (cd cluster/agent/fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/7: Running Python Claude Tests..."
+echo "[$(date +'%H:%M:%S')] 3/8: Running Python Claude Tests..."
 (source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/7: Running Dependency Security Scans..."
+echo "[$(date +'%H:%M:%S')] 3.5/8: Running Python Planner Tests..."
+(source ./venv/bin/activate && cd cluster/planner/planner && pytest plan_server_test.py plan_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 4/8: Running Dependency Security Scans..."
 
 echo "[+] Scanning Go Fileserver (govulncheck)..."
 (cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | tail -5)
@@ -43,7 +47,17 @@ echo "[+] Scanning Python Agent (pip-audit)..."
     "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r agent/claude/requirements.txt" 2>&1 | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' || echo "  ✅ pip-audit clean"
 )
 
-DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy")
+echo "[+] Scanning Python Planner (pip-audit)..."
+(cd cluster && \
+    docker run --rm \
+    -e PIP_ROOT_USER_ACTION=ignore \
+    -v "$(pwd)":/app \
+    -w /app \
+    python:3.11-slim /bin/bash -c \
+    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r planner/planner/requirements.txt" 2>&1 | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' || echo "  ✅ pip-audit clean"
+)
+
+DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan")
 
 echo "[+] Lint Dockerfiles (Hadolint)"
 for df in "${DOCKERFILES[@]}"; do
@@ -56,12 +70,12 @@ TRIVY_OUT=$(cd cluster && docker run --rm -v "$(pwd)":/app -w /app aquasec/trivy
 if [ $? -eq 0 ]; then echo "  ✅ Infrastructure config clean"; else echo "$TRIVY_OUT" | grep -E '(CRITICAL|HIGH|MEDIUM|FAIL)'; EXIT_CODE=1; fi
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 5/7: Building Containers..."
+echo "[$(date +'%H:%M:%S')] 5/8: Building Containers..."
 (cd cluster && docker-compose build --quiet)
 echo "  ✅ Build complete"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 6/7: Post-Build Security Scans..."
+echo "[$(date +'%H:%M:%S')] 6/8: Post-Build Security Scans..."
 
 echo "[+] Scanning Claude Code JS deps (npm audit)..."
 (
@@ -83,7 +97,10 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
 ) || echo "  ⚠️  npm audit section failed"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 7/7: Running Docker Integration Tests..."
+echo "[$(date +'%H:%M:%S')] 7/8: Running Docker Integration Tests..."
+
+# Create plans directory if needed
+mkdir -p plans
 
 # Launch the stack
 (./cluster/start-cluster.sh 2>&1 | tail -3)
@@ -100,6 +117,15 @@ else
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking MCP planner registration..."
+if docker exec claude-server python3 -c "import json; d=json.load(open('/home/appuser/sandbox/.mcp.json')); assert 'planner' in d['mcpServers']" 2>/dev/null; then
+  echo "  ✅ MCP planner registered and valid"
+else
+  echo "  ❌ MCP planner not registered"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "$(date +'%H:%M:%S') Checking MCP fileserver logs..."
 MCP_ERRORS=$(docker exec claude-server sh -c \
   'find /home/appuser/.cache/claude-cli-nodejs -path "*mcp-logs-fileserver*" -name "*.jsonl" 2>/dev/null | sort | tail -1 | xargs cat 2>/dev/null | grep -i error' 2>/dev/null || true)
@@ -108,6 +134,17 @@ if [ -n "$MCP_ERRORS" ]; then
   echo "$MCP_ERRORS" | head -5
 else
   echo "  ✅ MCP fileserver logs clean"
+fi
+
+echo "$(date +'%H:%M:%S') Checking plan-server health..."
+PLAN_HEALTH=$(docker exec claude-server curl -s -k https://plan-server:8443/health 2>/dev/null || echo "FAIL")
+if echo "$PLAN_HEALTH" | grep -q '"ok"'; then
+  echo "  ✅ plan-server healthy"
+else
+  echo "  ❌ plan-server not responding"
+  echo "  Response: $PLAN_HEALTH"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
 fi
 
 echo "[$(date +'%H:%M:%S')] Checking auth failure on Caddy endpoint..."
@@ -121,6 +158,40 @@ if [ "$AUTH_STATUS" -eq 401 ]; then
 else
   echo "  ❌ Expected 401 but got HTTP $AUTH_STATUS"
   (cd cluster && docker-compose logs 2>/dev/null | tail -20)
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 8/8: Plan-server isolation verification..."
+
+echo "$(date +'%H:%M:%S') Checking plan-server cannot see workspace..."
+WORKSPACE_CHECK=$(docker exec plan-server ls /workspace 2>&1 || true)
+if echo "$WORKSPACE_CHECK" | grep -q "No such file"; then
+  echo "  ✅ plan-server cannot see /workspace"
+else
+  echo "  ❌ plan-server can see /workspace"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking plan-server cannot see /gitdir..."
+GITDIR_CHECK=$(docker exec plan-server ls /gitdir 2>&1 || true)
+if echo "$GITDIR_CHECK" | grep -q "No such file"; then
+  echo "  ✅ plan-server cannot see /gitdir"
+else
+  echo "  ❌ plan-server can see /gitdir"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking plan-server env var isolation..."
+FORBIDDEN_VARS_CHECK=$(docker exec plan-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY)' || true)
+if [ -z "$FORBIDDEN_VARS_CHECK" ]; then
+  echo "  ✅ plan-server env var isolation clean"
+else
+  echo "  ❌ plan-server has forbidden env vars:"
+  echo "$FORBIDDEN_VARS_CHECK"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi
