@@ -14,7 +14,7 @@
       "action": "In fileserver/main.go, add three new HTTP handler functions and register their routes: (1) POST /grep \u2014 accepts JSON body {pattern, max_results?}, walks the os.OpenRoot-jailed /workspace tree, returns [{file, line_number, line}] up to max_results (default 100); (2) POST /replace \u2014 accepts {path, old_string, new_string}, reads file via OpenRoot, replaces all occurrences of old_string with new_string, writes back, returns {replacements_made}; fail with 4xx if replacements_made == 0; (3) POST /append \u2014 accepts {path, content}, opens file via OpenRoot for append, writes content, returns {bytes_written}. All three must use the existing os.OpenRoot root handle (never open files outside /workspace). In fileserver/main_test.go, add unit tests for each handler covering: happy path, zero-match failure for replace, max_results truncation for grep, and path-traversal rejection.",
       "verify": "Run `go test ./fileserver/...` \u2014 all existing tests still pass and new tests for grep_files, replace_in_file, and append_file pass.",
       "done": "`go test ./fileserver/...` exits 0 with no failures, and `go vet ./fileserver/...` reports no issues.",
-      "status": "current"
+      "status": "completed"
     },
     {
       "id": "t2",
@@ -26,7 +26,7 @@
       "action": "In files_mcp.py, add three new MCP tool definitions and handler functions mirroring the new REST endpoints: (1) grep_files(pattern: str, max_results: int = 100) \u2192 POST /grep, returns formatted results as 'file:lineno: line' strings; (2) replace_in_file(path: str, old_string: str, new_string: str) \u2192 POST /replace, returns the replacements_made count; (3) append_file(path: str, content: str) \u2192 POST /append, returns bytes_written. Follow the exact same pattern as existing tools (error handling, HTTPS to mcp-server:8443, MCP_API_TOKEN auth header). In test_files_mcp.py, add unit tests for each new function: mock the HTTPS call, assert correct endpoint/payload, assert correct return value, and assert HTTPError propagation.",
       "verify": "Run `python -m pytest test_files_mcp.py -v` \u2014 all existing tests still pass and new tests for grep_files, replace_in_file, and append_file pass.",
       "done": "`python -m pytest test_files_mcp.py` exits 0 with no failures and the three new tool names appear in the MCP server's tool list when files_mcp.py is run with `--list` or equivalent introspection.",
-      "status": "pending"
+      "status": "current"
     },
     {
       "id": "t3",
