@@ -107,7 +107,7 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 | :--- | :--- | :--- | :--- |
 | Claude Code version upgrade breaks --mcp-config or --print | Blocks everything | Medium | Pinned to @2.1.74; test before upgrading |
 | Claude changes API contracts during task execution | Broken code | High | System prompt constraint + plan action specificity |
-| Subprocess timeout too short for complex tasks | Incomplete work | Medium | 300s timeout; plan smaller tasks |
+| Subprocess timeout too short for complex tasks | Incomplete work | Medium | 600s timeout; plan smaller tasks |
 | Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; test runner gate in Phase 4 |
 | Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution |
 | Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in parent test.sh with network access |
