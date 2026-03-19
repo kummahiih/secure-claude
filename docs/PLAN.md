@@ -36,19 +36,20 @@ Added plan-then-execute workflow. Task structure inspired by
 - 42 server tests + 28 MCP wrapper tests + integration tests
 - Isolation: plan-server has no access to /workspace, /gitdir, or secrets
 
----
+### Phase 3 ✅ Test Runner MCP Tool
 
-## Phase 3: Test Runner MCP Tool
+Added tester-server as 6th container — a Go REST server that runs
+`/workspace/test.sh` as a direct subprocess. No Docker socket access required.
 
-### Design
-
-- `docker run` for sibling containers (not Docker-in-Docker)
-- Each language gets its own test container with only its source folder mounted
-- Claude-written tests must be mocked unit tests only — no credentials reachable
-- Test runner needs Docker socket access — document the security implication
-- `cluster/test-runner/` lives in parent repo (Claude can't modify it)
-
-Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
+- tester-server: Go REST server (POST /run, GET /results, GET /health)
+- tester_mcp.py: stdio wrapper inside claude-server (run_tests, get_test_results)
+- secure-claude-tester: separate submodule at cluster/tester/
+- Dockerfile.tester: 3-stage build (Go binary + TLS cert + runtime with Go/Python test tooling)
+- Workspace mounted read-only — tests cannot modify source
+- Concurrent run rejection (409 Conflict)
+- Test architecture split: sub-repo test.sh = unit tests only (no network); parent test.sh = security scans + integration
+- 13 MCP wrapper tests + integration tests (health, auth, isolation)
+- Isolation: tester-server has no access to /gitdir, /plans, or secrets
 
 ---
 
@@ -60,7 +61,13 @@ runs tests → interprets results → commits. All without human intervention.
 ### Acceptance Criteria
 
 A single `plan.sh` + repeated `query.sh` results in Claude completing all tasks,
-running tests, fixing failures, and committing — with human reviewing only the plan.
+running tests via the tester MCP tool, fixing failures, and committing — with
+human reviewing only the plan.
+
+### Remaining work
+- [ ] Update system prompt to instruct agent to run tests after completing code changes
+- [ ] Add test-gate: agent should call run_tests + get_test_results before plan_complete
+- [ ] Handle test failure loop: agent retries fixes up to N times before plan_block
 
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
@@ -68,7 +75,7 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
 ## Phase 5: Hardening and Polish
 
-- [ ] Resource limits on test runner containers (timeout, memory)
+- [ ] Resource limits on tester-server (timeout, memory caps for test runs)
 - [ ] Output sanitization from test runner (strip any leaked env vars)
 - [ ] Tag a release
 - [ ] Egress TLS: Caddyfile currently uses `tls_insecure_skip_verify` for the
@@ -80,7 +87,8 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
   `tls_trusted_ca_certs` pointing to the appropriate bundle.
 
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
-[planner PLAN.md](../cluster/planner/docs/PLAN.md)
+[planner PLAN.md](../cluster/planner/docs/PLAN.md),
+[tester PLAN.md](../cluster/tester/docs/PLAN.md)
 
 ---
 
@@ -97,8 +105,9 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 
 | Risk | Impact | Likelihood | Mitigation |
 | :--- | :--- | :--- | :--- |
-| Test runner Docker socket access creates escape vector | Security gap | Medium | Document, consider rootless Docker or Sysbox |
 | Claude Code version upgrade breaks --mcp-config or --print | Blocks everything | Medium | Pinned to @2.1.74; test before upgrading |
 | Claude changes API contracts during task execution | Broken code | High | System prompt constraint + plan action specificity |
 | Subprocess timeout too short for complex tasks | Incomplete work | Medium | 300s timeout; plan smaller tasks |
-| Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; future: test runner gate |
+| Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; test runner gate in Phase 4 |
+| Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution |
+| Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in parent test.sh with network access |

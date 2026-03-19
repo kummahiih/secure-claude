@@ -94,6 +94,17 @@
             },
             "required": ["path", "content"]
           }
+        },
+        {
+          "name": "create_directory",
+          "description": "Creates a new directory in the workspace.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string", "description": "Path for the new directory"}
+            },
+            "required": ["path"]
+          }
         }
       ]
     },
@@ -127,6 +138,28 @@
         {"name": "plan_block", "description": "Mark the current task as blocked"},
         {"name": "plan_create", "description": "Create a new plan with goal and tasks"},
         {"name": "plan_update_task", "description": "Update a task's fields"}
+      ]
+    },
+    "tester": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/tester_mcp.py"],
+      "tools": [
+        {
+          "name": "run_tests",
+          "description": "Starts an async test run against the current workspace. Returns immediately with status 'started'. Poll get_test_results to check outcome. Returns 409 if a run is already in progress.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        },
+        {
+          "name": "get_test_results",
+          "description": "Returns the result of the most recent test run as JSON with fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
       ]
     }
   }

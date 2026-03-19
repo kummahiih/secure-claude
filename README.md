@@ -14,18 +14,21 @@ Host / Network
           ├─> MCP stdio servers (inside claude-server)
           ├─> mcp-server:8443 (Go REST, filesystem jail)
           │    └─> /workspace (bind mount → active sub-repo)
-          └─> plan-server:8443 (Python REST, plan state)
-               └─> /plans (bind mount → plans/)
+          ├─> plan-server:8443 (Python REST, plan state)
+          │    └─> /plans (bind mount → plans/)
+          └─> tester-server:8443 (Go REST, test runner)
+               └─> /workspace:ro (bind mount → active sub-repo)
 ```
 
-Five containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](WORKSPACE_INTERFACE.md).
+Six containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](WORKSPACE_INTERFACE.md).
 
 ## Sub-Repositories
 
 | Repository | Description | Docs |
 | :--- | :--- | :--- |
-| [secure-claude-agent](cluster/agent/) | MCP tool servers (files, git, docs, planner wrappers) + Claude Code integration | [README](cluster/agent/README.md) |
+| [secure-claude-agent](cluster/agent/) | MCP tool servers (files, git, docs, planner, tester wrappers) + Claude Code integration | [README](cluster/agent/README.md) |
 | [secure-claude-planner](cluster/planner/) | Plan-server REST API for task state management | [README](cluster/planner/README.md) |
+| [secure-claude-tester](cluster/tester/) | Tester-server REST API for running workspace tests | [README](cluster/tester/README.md) |
 
 Each sub-repo contains its own `docs/CONTEXT.md` (architecture) and `docs/PLAN.md` (roadmap). See the [workspace interface spec](WORKSPACE_INTERFACE.md) for the standardized structure.
 
@@ -36,6 +39,7 @@ secure-claude/                          # This repo — orchestration, infrastru
 ├── cluster/
 │   ├── agent/                          ← submodule → secure-claude-agent
 │   ├── planner/                        ← submodule → secure-claude-planner
+│   ├── tester/                         ← submodule → secure-claude-tester
 │   ├── workspace                       ← symlink → active sub-repo
 │   ├── caddy/                          # Caddy reverse proxy config
 │   ├── proxy/                          # LiteLLM proxy config
@@ -66,6 +70,7 @@ Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos docu
 6. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
 7. **Non-Root Containers** — UID 1000, cap_drop: ALL on proxy
 8. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
+9. **Test Isolation** — tester-server runs tests as subprocesses with workspace mounted read-only
 
 ## Quick Start
 
@@ -118,6 +123,12 @@ Copy the `sk-ant-oat01-...` token into `.secrets.env` as `ANTHROPIC_API_KEY`.
 ./query.sh claude-sonnet-4-6 "work on the current task"
 ```
 
+6. Run tests via the agent
+
+```bash
+./query.sh claude-sonnet-4-6 "Use run_tests to start a test run, wait 30 seconds, then use get_test_results to check the outcome."
+```
+
 ## Switching the Active Workspace
 
 To develop a different sub-repo, update the workspace symlink and the bind mounts in `docker-compose.yml`:
@@ -156,9 +167,9 @@ Then update `docker-compose.yml` mount paths (or use the provided mount profiles
 | Tool | Focus | Target |
 | :--- | :--- | :--- |
 | pytest | Unit tests | agent, planner |
-| go test | Unit tests | agent/fileserver/ |
+| go test | Unit tests | agent/fileserver/, tester/ |
 | pip-audit | CVE scanning | agent + planner requirements.txt |
-| govulncheck | CVE scanning | agent/fileserver/ Go modules |
+| govulncheck | CVE scanning | agent/fileserver/ + tester/ Go modules |
 | npm audit | CVE scanning | Claude Code JS dependencies |
 | hadolint | Dockerfile linting | All Dockerfile.* |
 | trivy | Misconfiguration | docker-compose.yml + images |

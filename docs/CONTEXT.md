@@ -13,6 +13,7 @@ Repos:
 - Parent: secure-claude (this repo)
 - Agent submodule: [secure-claude-agent](../cluster/agent/)
 - Planner submodule: [secure-claude-planner](../cluster/planner/)
+- Tester submodule: [secure-claude-tester](../cluster/tester/)
 
 ---
 
@@ -24,34 +25,39 @@ Host / Network
      └─> claude-server:8000 (FastAPI + Claude Code subprocess)
           ├─> proxy:4000 (LiteLLM) ──> Anthropic API
           ├─> MCP stdio servers (inside claude-server):
-          │    ├─> files_mcp.py → HTTPS REST → mcp-server:8443
-          │    ├─> git_mcp.py   → git subprocess (GIT_DIR=/gitdir)
-          │    ├─> docs_mcp.py  → reads /docs (read-only mount)
-          │    └─> plan_mcp.py  → HTTPS REST → plan-server:8443
+          │    ├─> files_mcp.py  → HTTPS REST → mcp-server:8443
+          │    ├─> git_mcp.py    → git subprocess (GIT_DIR=/gitdir)
+          │    ├─> docs_mcp.py   → reads /docs (read-only mount)
+          │    ├─> plan_mcp.py   → HTTPS REST → plan-server:8443
+          │    └─> tester_mcp.py → HTTPS REST → tester-server:8443
           ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
           │    └─> /workspace (bind mount → active sub-repo)
-          └─> plan-server:8443 (Python REST, JSON plan files)
-               └─> /plans (bind mount → plans/)
+          ├─> plan-server:8443 (Python REST, JSON plan files)
+          │    └─> /plans (bind mount → plans/)
+          └─> tester-server:8443 (Go REST, test runner)
+               └─> /workspace:ro (bind mount → active sub-repo)
 ```
 
-### Five containers, all on internal Docker network (int_net):
+### Six containers, all on internal Docker network (int_net):
 
 | Service | Description | Isolation checks |
 | :--- | :--- | :--- |
 | caddy-sidecar | TLS termination, external ingress, reverse proxy | caddy_entrypoint.sh |
-| claude-server | FastAPI + Claude Code CLI subprocess + 4 MCP stdio servers | verify_isolation.py (26 checks) |
+| claude-server | FastAPI + Claude Code CLI subprocess + 5 MCP stdio servers | verify_isolation.py (26 checks) |
 | proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY | proxy_wrapper.py (4 checks) |
 | mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
 | plan-server | Python REST server, plan state in /plans | plan_server.py (10 checks) |
+| tester-server | Go REST server, runs /workspace/test.sh as subprocess | entrypoint.sh (env scan + /workspace check) |
 
 ### MCP tool sets available to Claude Code:
 
 | Server | Tools | Transport | Access |
 | :--- | :--- | :--- | :--- |
-| fileserver | read_workspace_file, list_files, create_file, write_file, delete_file | stdio → HTTPS REST | Read/write /workspace via Go fileserver |
+| fileserver | read_workspace_file, list_files, create_file, write_file, delete_file, grep_files, replace_in_file, append_file, create_directory | stdio → HTTPS REST | Read/write /workspace via Go fileserver |
 | git | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → git subprocess | Read/write /gitdir, read /workspace |
 | docs | list_docs, read_doc | stdio → local filesystem | Read-only /docs |
 | planner | plan_current, plan_list, plan_complete, plan_block, plan_create, plan_update_task | stdio → HTTPS REST | Read/write plan state via plan-server |
+| tester | run_tests, get_test_results | stdio → HTTPS REST | Run tests and retrieve results via tester-server |
 
 ### Two endpoints:
 
@@ -69,7 +75,8 @@ Host / Network
 5. Claude Code → mcp-watchdog → files_mcp.py → HTTPS REST → mcp-server:8443
 6. Claude Code → mcp-watchdog → git_mcp.py → git subprocess
 7. Claude Code → mcp-watchdog → plan_mcp.py → plan_complete → plan-server:8443
-8. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → Anthropic API
+8. Claude Code → mcp-watchdog → tester_mcp.py → HTTPS REST → tester-server:8443
+9. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → Anthropic API
 
 ### Volume mounts on claude-server:
 
@@ -92,6 +99,12 @@ Host / Network
 | :--- | :--- | :--- | :--- |
 | ../plans | /plans | rw | Plan state files (JSON) |
 
+### Volume mounts on tester-server:
+
+| Host path | Container path | Mode | Purpose |
+| :--- | :--- | :--- | :--- |
+| ./workspace (→ active sub-repo) | /workspace | ro | Test runner reads source and executes test.sh |
+
 ---
 
 ## Core Security Principles
@@ -107,32 +120,37 @@ Enforce boundaries structurally, never by filtering.
 6. Git hook prevention — /dev/null shadow + separated gitdir + core.hooksPath=/dev/null
 7. Git history protection — baseline commit floor at container startup
 8. Plan isolation — plan-server has no access to /workspace, /gitdir, or secrets
-9. Dual auth — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
-10. TLS everywhere — internal CA, all service-to-service over HTTPS
-11. Startup isolation checks — every container validates before serving
-12. MCP config as build artifact — .mcp.json baked into image
-13. Non-root containers — UID 1000, cap_drop: ALL on proxy
+9. Test isolation — tester-server has /workspace read-only, no access to /gitdir, /plans, or secrets
+10. Dual auth — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
+11. TLS everywhere — internal CA, all service-to-service over HTTPS
+12. Startup isolation checks — every container validates before serving
+13. MCP config as build artifact — .mcp.json baked into image
+14. Non-root containers — UID 1000, cap_drop: ALL on proxy
 
 ### Token isolation matrix:
 
-| Token | claude-server | proxy | mcp-server | plan-server | caddy |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✓ required | ✗ forbidden |
+| Token | claude-server | proxy | mcp-server | plan-server | tester-server | caddy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✓ required | ✓ required | ✗ forbidden |
 
 ---
 
 ## Test Suite (test.sh)
 
 1. Caddy config validation
-2. Go unit tests (fileserver)
-3. Python unit tests (claude server, MCP tools, isolation, git tools)
-4. Python unit tests (planner server, planner MCP wrapper)
-5. Security scans (govulncheck, pip-audit, hadolint, trivy, npm audit)
-6. Docker build
-7. Integration tests (MCP registration, plan-server health, auth, isolation)
+2. Dockerfile linting (hadolint)
+3. Docker Compose config scan (trivy)
+4. Docker build
+5. Security scans (govulncheck for fileserver + tester, pip-audit, npm audit)
+6. Sub-repo unit tests (agent, planner, tester)
+7. Integration tests (MCP registration, health checks, auth, isolation for all services)
+
+### Test architecture split:
+- **Sub-repo test.sh** — unit tests only, no network required, runnable inside tester-server
+- **Parent test.sh** — security scans (need network for vuln DBs) + integration tests (need Docker)
 
 ---
 
@@ -150,7 +168,13 @@ Enforce boundaries structurally, never by filtering.
 | Plan format | JSON | XML (GSD-style) | Simpler parsing, no schema library needed |
 | Plan storage | Parent repo plans/ | Agent workspace | Plans are infrastructure, not agent-modifiable code |
 | Planner repo | Separate submodule | Inside agent submodule | Independent development; swappable workspace for self-development |
+| Test execution | Direct subprocess in tester-server | Docker-in-Docker | No socket access needed, simpler, no privilege escalation |
+| Tester workspace access | Read-only mount | Read-write | Tests should never modify source |
+| Security scans location | Parent test.sh only | Sub-repo test.sh | Vuln DB fetches need network; sub-repo tests run in network-isolated tester |
+| Tester repo | Separate submodule (cluster/tester/) | Directory in parent | Consistent with agent/planner pattern; independently developable |
+| Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
 
 Sub-repo specific implementation details:
 - Agent: [docs/CONTEXT.md](../cluster/agent/docs/CONTEXT.md)
 - Planner: [docs/CONTEXT.md](../cluster/planner/docs/CONTEXT.md)
+- Tester: [docs/CONTEXT.md](../cluster/tester/docs/CONTEXT.md)
