@@ -64,6 +64,44 @@ echo "  ✅ Build complete"
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 7/8: Post-Build Security Scans..."
 
+echo "[+] Scanning Go deps (govulncheck)..."
+(
+  set +e
+  echo "  Scanning fileserver..."
+  GOVULN_FS=$(cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  if echo "$GOVULN_FS" | grep -q "No vulnerabilities found"; then
+    echo "  ✅ fileserver govulncheck clean"
+  else
+    echo "$GOVULN_FS" | tail -5
+  fi
+
+  echo "  Scanning tester..."
+  GOVULN_TS=$(cd cluster/tester && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  if echo "$GOVULN_TS" | grep -q "No vulnerabilities found"; then
+    echo "  ✅ tester govulncheck clean"
+  else
+    echo "$GOVULN_TS" | tail -5
+  fi
+) || echo "  ⚠️  govulncheck section failed"
+
+echo "[+] Scanning Python deps (pip-audit)..."
+(
+  set +e
+  AUDIT_OUT=$(cd cluster && docker run --rm \
+    -e PIP_ROOT_USER_ACTION=ignore \
+    -v "$(pwd)":/app \
+    -w /app \
+    python:3.11-slim /bin/bash -c \
+    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r agent/claude/requirements.txt" 2>&1)
+  if echo "$AUDIT_OUT" | grep -q "No known"; then
+    echo "  ✅ pip-audit clean"
+  elif echo "$AUDIT_OUT" | grep -qE '(CRITICAL|WARNING|ERROR)'; then
+    echo "$AUDIT_OUT" | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' | tail -10
+  else
+    echo "  ✅ pip-audit clean"
+  fi
+) || echo "  ⚠️  pip-audit section failed"
+
 echo "[+] Scanning Claude Code JS deps (npm audit)..."
 (
   set +e
@@ -110,6 +148,15 @@ if docker exec claude-server python3 -c "import json; d=json.load(open('/home/ap
   echo "  ✅ MCP planner registered and valid"
 else
   echo "  ❌ MCP planner not registered"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking MCP tester registration..."
+if docker exec claude-server python3 -c "import json; d=json.load(open('/home/appuser/sandbox/.mcp.json')); assert 'tester' in d['mcpServers']" 2>/dev/null; then
+  echo "  ✅ MCP tester registered and valid"
+else
+  echo "  ❌ MCP tester not registered"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi

@@ -78,6 +78,10 @@ COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
      "planner": {
        "command": "mcp-watchdog",
        "args": ["--verbose", "--", "python3", "/app/plan_mcp.py"]
+     },
+     "tester": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/tester_mcp.py"]
      }
   }
 }
