@@ -64,9 +64,10 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
 (
   set +e
   TMPDIR=$(mktemp -d)
-  docker create --name npm-audit-tmp cluster-claude-server >/dev/null 2>&1
-  docker cp npm-audit-tmp:/usr/lib/node_modules/@anthropic-ai/claude-code "$TMPDIR/claude-code" 2>/dev/null
-  docker rm npm-audit-tmp >/dev/null 2>&1
+  NPM_CTR="npm-audit-tmp-$$"
+  docker create --name "$NPM_CTR" cluster-claude-server >/dev/null 2>&1
+  docker cp "$NPM_CTR":/usr/lib/node_modules/@anthropic-ai/claude-code "$TMPDIR/claude-code" 2>/dev/null
+  docker rm "$NPM_CTR" >/dev/null 2>&1
   NPM_OUT=$(cd "$TMPDIR/claude-code" && npm i --package-lock-only --ignore-scripts 2>/dev/null && npm audit --omit=dev 2>&1) || true
   rm -rf "$TMPDIR"
   if echo "$NPM_OUT" | grep -q "found 0 vulnerabilities"; then

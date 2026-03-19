@@ -24,6 +24,11 @@ for key in "${REQUIRED_KEYS[@]}"; do
     fi
 done
 
+if ! echo "$HOST_DOMAIN" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$'; then
+    echo "[$(date +'%H:%M:%S')] Error: HOST_DOMAIN '$HOST_DOMAIN' is not a valid domain name."
+    exit 1
+fi
+
 # 3. Generate and Save Secure API Tokens
 echo "[$(date +'%H:%M:%S')] Cleaning up old token files..."
 rm -f .env .cluster_tokens.env

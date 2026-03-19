@@ -28,7 +28,7 @@ RESPONSE=$(curl -s -X POST https://localhost:8443/ask \
   --cacert ./cluster/certs/ca.crt \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $CLAUDE_API_TOKEN" \
-  -d "{\"model\": \"$MODEL\",\"query\": \"$QUERY\"}")
+  -d "$(jq -n --arg model "$MODEL" --arg query "$QUERY" '{model: $model, query: $query}')")
 
 # 5. Format output
 if [ "${3}" = "--raw" ]; then

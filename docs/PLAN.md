@@ -71,6 +71,13 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 - [ ] Resource limits on test runner containers (timeout, memory)
 - [ ] Output sanitization from test runner (strip any leaked env vars)
 - [ ] Tag a release
+- [ ] Egress TLS: Caddyfile currently uses `tls_insecure_skip_verify` for the
+  egress proxy to `host.docker.internal:443`. This is intentional — the host
+  nginx uses its own self-signed CA that is unrelated to the cluster's internal
+  CA (which is ephemeral and regenerated on each `run.sh`). Before a production
+  deployment: provision the host proxy with a cert from the cluster CA (or a
+  trusted public CA), remove `tls_insecure_skip_verify`, and add
+  `tls_trusted_ca_certs` pointing to the appropriate bundle.
 
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 [planner PLAN.md](../cluster/planner/docs/PLAN.md)

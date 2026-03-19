@@ -30,7 +30,7 @@ RESPONSE=$(curl -s -X POST https://localhost:8443/plan \
   --cacert ./cluster/certs/ca.crt \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $CLAUDE_API_TOKEN" \
-  -d "{\"model\": \"$MODEL\",\"query\": \"$QUERY\"}")
+  -d "$(jq -n --arg model "$MODEL" --arg query "$QUERY" '{model: $model, query: $query}')")
 
 # 5. Show Claude's response
 echo ""
@@ -50,19 +50,19 @@ echo "=== Current Plan ==="
 # Find the most recent plan file
 LATEST=$(ls -t plans/plan-*.json 2>/dev/null | head -1)
 if [ -n "$LATEST" ]; then
-  python3 -c "
+  python3 - "$LATEST" <<'EOF'
 import json, sys
-plan = json.load(open('$LATEST'))
-print(f\"Plan: {plan['id']}\")
-print(f\"Goal: {plan['goal']}\")
-print(f\"Status: {plan['status']}\")
+plan = json.load(open(sys.argv[1]))
+print(f"Plan: {plan['id']}")
+print(f"Goal: {plan['goal']}")
+print(f"Status: {plan['status']}")
 print()
 for t in plan['tasks']:
     marker = {'completed': '✓', 'current': '→', 'pending': ' ', 'blocked': '✗', 'in_progress': '…'}.get(t['status'], '?')
-    print(f\"  [{marker}] {t['id']}: {t['name']} ({t['status']})\")
+    print(f"  [{marker}] {t['id']}: {t['name']} ({t['status']})")
     if t.get('files'):
-        print(f\"      files: {', '.join(t['files'])}\")
-"
+        print(f"      files: {', '.join(t['files'])}")
+EOF
 else
   echo "No plan files found in plans/"
 fi

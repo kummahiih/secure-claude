@@ -14,7 +14,7 @@ RUN --mount=type=bind,source=certs/ca.key,target=/tmp/ca.key \
     -out proxy.crt -days 365 -sha256 -extfile proxy.ext
 
 # Stage 2: Final Proxy Image
-FROM ghcr.io/berriai/litellm:main-latest
+FROM ghcr.io/berriai/litellm:main-latest@sha256:59a2736ac84800821fa0e1656487366089f2d29d10f8ae05c918df9c6e4940af
 
 # Temporarily switch to root to update system certificates
 USER root
