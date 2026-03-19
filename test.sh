@@ -19,12 +19,12 @@ echo "  CLUSTER-LEVEL TESTS"
 echo "========================================"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/7: Validating Caddy Edge Router..."
+echo "[$(date +'%H:%M:%S')] 1/8: Validating Caddy Edge Router..."
 (bash ./cluster/caddy/caddy_test.sh 2>&1 | tail -3)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/7: Lint Dockerfiles (Hadolint)..."
-DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan")
+echo "[$(date +'%H:%M:%S')] 2/8: Lint Dockerfiles (Hadolint)..."
+DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan" "Dockerfile.tester")
 for df in "${DOCKERFILES[@]}"; do
     RESULT=$(docker run --rm -i hadolint/hadolint:v2.12.0 < cluster/"$df" 2>&1)
     if [ $? -eq 0 ]; then echo "  ✅ $df"; else echo "  ⚠️  $df:"; echo "$RESULT"; EXIT_CODE=1; fi
@@ -40,12 +40,16 @@ echo "  SUB-REPOSITORY TESTS"
 echo "========================================"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/7: Running agent tests..."
+echo "[$(date +'%H:%M:%S')] 3/8: Running agent tests..."
 (cd cluster/agent && ./test.sh)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/7: Running planner tests..."
+echo "[$(date +'%H:%M:%S')] 4/8: Running planner tests..."
 (cd cluster/planner && ./test.sh)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 5/8: Running tester tests..."
+(cd cluster/tester && ./test.sh)
 
 
 echo "========================================"
@@ -53,12 +57,12 @@ echo "  BUILD + INTEGRATION"
 echo "========================================"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 5/7: Building Containers..."
+echo "[$(date +'%H:%M:%S')] 6/8: Building Containers..."
 (cd cluster && docker-compose build --quiet)
 echo "  ✅ Build complete"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 6/7: Post-Build Security Scans..."
+echo "[$(date +'%H:%M:%S')] 7/8: Post-Build Security Scans..."
 
 echo "[+] Scanning Claude Code JS deps (npm audit)..."
 (
@@ -81,7 +85,7 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
 ) || echo "  ⚠️  npm audit section failed"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 7/7: Running Docker Integration Tests..."
+echo "[$(date +'%H:%M:%S')] 8/8: Running Docker Integration Tests..."
 
 # Create plans directory if needed
 mkdir -p plans
@@ -175,6 +179,61 @@ if [ -z "$FORBIDDEN_VARS_CHECK" ]; then
 else
   echo "  ❌ plan-server has forbidden env vars:"
   echo "$FORBIDDEN_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Tester-server integration verification..."
+
+echo "$(date +'%H:%M:%S') Checking tester-server health..."
+TESTER_HEALTH=$(docker exec claude-server curl -s -k https://tester-server:8443/health 2>/dev/null || echo "FAIL")
+if [ "$TESTER_HEALTH" != "FAIL" ]; then
+  echo "  ✅ tester-server healthy"
+else
+  echo "  ❌ tester-server not responding"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking tester-server env var isolation..."
+TESTER_VARS_CHECK=$(docker exec tester-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY)' || true)
+if [ -z "$TESTER_VARS_CHECK" ]; then
+  echo "  ✅ tester-server env var isolation clean"
+else
+  echo "  ❌ tester-server has forbidden env vars:"
+  echo "$TESTER_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking tester-server cannot see /gitdir..."
+TESTER_GITDIR_CHECK=$(docker exec tester-server ls /gitdir 2>&1 || true)
+if echo "$TESTER_GITDIR_CHECK" | grep -q "No such file"; then
+  echo "  ✅ tester-server cannot see /gitdir"
+else
+  echo "  ❌ tester-server can see /gitdir"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking tester-server cannot see /plans..."
+TESTER_PLANS_CHECK=$(docker exec tester-server ls /plans 2>&1 || true)
+if echo "$TESTER_PLANS_CHECK" | grep -q "No such file"; then
+  echo "  ✅ tester-server cannot see /plans"
+else
+  echo "  ❌ tester-server can see /plans"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking tester-server auth rejects bad token..."
+TESTER_AUTH=$(docker exec claude-server curl -s -o /dev/null -w "%{http_code}" -k \
+  -X POST https://tester-server:8443/run \
+  -H "Authorization: Bearer wrong-token" 2>/dev/null || echo "000")
+if [ "$TESTER_AUTH" = "401" ]; then
+  echo "  ✅ tester-server auth correctly rejects invalid token"
+else
+  echo "  ❌ tester-server expected 401 but got $TESTER_AUTH"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi
