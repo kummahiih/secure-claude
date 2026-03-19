@@ -10,9 +10,9 @@ The agent supports a plan-then-execute workflow: structured plans are created vi
 `plan.sh`, then executed task-by-task via `query.sh`.
 
 Repos:
-- Parent: https://github.com/kummahiih/secure-claude
-- Agent submodule: https://github.com/kummahiih/secure-claude-agent
-- Planner submodule: https://github.com/kummahiih/secure-claude-planner
+- Parent: secure-claude (this repo)
+- Agent submodule: [secure-claude-agent](../cluster/agent/)
+- Planner submodule: [secure-claude-planner](../cluster/planner/)
 
 ---
 
@@ -29,7 +29,7 @@ Host / Network
           │    ├─> docs_mcp.py  → reads /docs (read-only mount)
           │    └─> plan_mcp.py  → HTTPS REST → plan-server:8443
           ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
-          │    └─> /workspace (bind mount → cluster/agent/)
+          │    └─> /workspace (bind mount → active sub-repo)
           └─> plan-server:8443 (Python REST, JSON plan files)
                └─> /plans (bind mount → plans/)
 ```
@@ -75,15 +75,15 @@ Host / Network
 
 | Host path | Container path | Mode | Purpose |
 | :--- | :--- | :--- | :--- |
-| ./workspace (→ ./agent) | /workspace | ro | Worktree for git operations |
-| ../.git/modules/cluster/agent | /gitdir | rw | Git data for add/commit |
-| ../docs | /docs | ro | Project documentation |
+| ./workspace (→ active sub-repo) | /workspace | ro | Worktree for git operations |
+| ../.git/modules/cluster/\<sub-repo\> | /gitdir | rw | Git data for add/commit |
+| active sub-repo/docs | /docs | ro | Project documentation |
 
 ### Volume mounts on mcp-server:
 
 | Host path | Container path | Mode | Purpose |
 | :--- | :--- | :--- | :--- |
-| ./workspace (→ ./agent) | /workspace | rw | Go fileserver reads/writes agent code |
+| ./workspace (→ active sub-repo) | /workspace | rw | Go fileserver reads/writes code |
 | /dev/null | /workspace/.git | ro | Shadows .git — structural hook prevention |
 
 ### Volume mounts on plan-server:
@@ -103,7 +103,7 @@ Enforce boundaries structurally, never by filtering.
 2. Network isolation — claude-server on int_net only, no direct internet
 3. MCP security proxy — mcp-watchdog intercepts all JSON-RPC, blocks 40+ attack classes
 4. Filesystem jail — os.OpenRoot at /workspace, traversal blocked at Go runtime level
-5. Repo isolation — agent submodule as /workspace; parent repo not visible
+5. Repo isolation — active sub-repo as /workspace; parent repo not visible
 6. Git hook prevention — /dev/null shadow + separated gitdir + core.hooksPath=/dev/null
 7. Git history protection — baseline commit floor at container startup
 8. Plan isolation — plan-server has no access to /workspace, /gitdir, or secrets
@@ -121,73 +121,6 @@ Enforce boundaries structurally, never by filtering.
 | DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✓ required | ✗ forbidden |
-
----
-
-## Planning Tool
-
-### JSON task format
-
-Plans are JSON files in `plans/`. Each plan has a goal and 2-10 tasks:
-
-```json
-{
-  "id": "plan-20260317-120000",
-  "goal": "Add input validation to /read endpoint",
-  "status": "in_progress",
-  "tasks": [
-    {
-      "id": "t1",
-      "name": "Add validation to handler",
-      "files": ["fileserver/main.go"],
-      "action": "Add three guard clauses before filesystem call...",
-      "verify": "go build ./... compiles clean",
-      "done": "Handler has all three guard clauses",
-      "status": "current"
-    }
-  ]
-}
-```
-
-Task statuses: pending → current → completed (or blocked).
-One current task at a time. Completing advances the next pending task.
-
-### Plan file naming
-
-`plan-YYYY-MM-DD-<5-char-hmac>.json` — HMAC derived from plan ID and MCP_API_TOKEN.
-
-### System prompt behavior
-
-- `/plan` endpoint: Claude reads docs, creates plan via plan_create. No code execution.
-- `/ask` endpoint: Claude calls plan_current first. If a task exists, works on it, then calls plan_complete. If no plan, proceeds normally.
-- API contract protection: system prompt instructs Claude not to change existing interfaces unless explicitly required.
-
----
-
-## Key Implementation Details
-
-### claude-server subprocess call:
-```python
-subprocess.run(
-    ["claude", "--print", "--dangerously-skip-permissions",
-     "--output-format", "json",
-     "--mcp-config", "/home/appuser/sandbox/.mcp.json",
-     "--model", request.model,
-     "--system-prompt", SYSTEM_PROMPT,
-     "--", request.query],
-    timeout=300,
-    env={..., "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY}
-)
-```
-
-### Git hook prevention (3 layers):
-1. mcp-server: /dev/null shadow on .git — fileserver can't see git data
-2. claude-server: gitdir at /gitdir — fileserver MCP can't reach hooks
-3. git_mcp.py: core.hooksPath=/dev/null + --no-verify on every call
-
-### Isolation checks (verify_isolation.py):
-- Runs at container startup only, never in MCP subprocess children
-- Claude Code passes ANTHROPIC_API_KEY to children, which would false-positive
 
 ---
 
@@ -217,3 +150,7 @@ subprocess.run(
 | Plan format | JSON | XML (GSD-style) | Simpler parsing, no schema library needed |
 | Plan storage | Parent repo plans/ | Agent workspace | Plans are infrastructure, not agent-modifiable code |
 | Planner repo | Separate submodule | Inside agent submodule | Independent development; swappable workspace for self-development |
+
+Sub-repo specific implementation details:
+- Agent: [docs/CONTEXT.md](../cluster/agent/docs/CONTEXT.md)
+- Planner: [docs/CONTEXT.md](../cluster/planner/docs/CONTEXT.md)

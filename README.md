@@ -11,107 +11,42 @@ Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
      └─> claude-server:8000 (FastAPI + Claude Code)
           ├─> proxy:4000 (LiteLLM) ──> Anthropic API
-          ├─> MCP stdio servers (inside claude-server):
-          │    ├─> files_mcp.py → HTTPS REST → mcp-server:8443
-          │    ├─> git_mcp.py   → git subprocess (/gitdir)
-          │    ├─> docs_mcp.py  → local read (/docs)
-          │    └─> plan_mcp.py  → HTTPS REST → plan-server:8443
-          ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
-          │    └─> /workspace (bind mount → cluster/agent/)
-          └─> plan-server:8443 (Python REST, JSON plan files)
+          ├─> MCP stdio servers (inside claude-server)
+          ├─> mcp-server:8443 (Go REST, filesystem jail)
+          │    └─> /workspace (bind mount → active sub-repo)
+          └─> plan-server:8443 (Python REST, plan state)
                └─> /plans (bind mount → plans/)
 ```
 
-### Service Roles
+Five containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](WORKSPACE_INTERFACE.md).
 
-| Service | Image | Network(s) | Description |
-| :--- | :--- | :--- | :--- |
-| caddy-sidecar | Dockerfile.caddy | ext_net, int_net | TLS termination & reverse proxy |
-| claude-server | Dockerfile.claude | int_net | FastAPI + Claude Code agent + 4 MCP stdio servers |
-| proxy | Dockerfile.proxy | ext_net, int_net | LiteLLM gateway to Anthropic |
-| mcp-server | Dockerfile.mcp | int_net | Go filesystem tool server |
-| plan-server | Dockerfile.plan | int_net | Plan state management server |
+## Sub-Repositories
 
-### MCP Tool Sets
-
-The agent has access to four tool sets via MCP, all wrapped by mcp-watchdog:
-
-| Tool Set | Tools | Purpose |
+| Repository | Description | Docs |
 | :--- | :--- | :--- |
-| **fileserver** | read, list, create, write, delete | File operations in /workspace via Go REST server |
-| **git** | status, diff, add, commit, log, reset_soft | Git operations with hook prevention and history protection |
-| **docs** | list_docs, read_doc | Read-only access to project documentation |
-| **planner** | plan_current, plan_list, plan_complete, plan_block, plan_create, plan_update_task | Task planning and progress tracking |
+| [secure-claude-agent](cluster/agent/) | MCP tool servers (files, git, docs, planner wrappers) + Claude Code integration | [README](cluster/agent/README.md) |
+| [secure-claude-planner](cluster/planner/) | Plan-server REST API for task state management | [README](cluster/planner/README.md) |
 
----
-
-## Two Workflows
-
-### Direct execution
-
-```bash
-./query.sh claude-sonnet-4-6 "create a file called hello.py with a hello world function"
-```
-
-### Plan-then-execute (recommended for multi-step changes)
-
-```bash
-# 1. Create a plan (Claude reads docs, produces structured tasks, no code)
-./plan.sh claude-sonnet-4-6 "add input validation to the read endpoint in the Go fileserver"
-
-# 2. Review the plan
-cat plans/plan-*.json | python3 -m json.tool
-
-# 3. Execute tasks one at a time
-./query.sh claude-sonnet-4-6 "work on the current task"
-# Repeat for each task — Claude advances automatically
-```
-
----
-
-## Security Guardrails
-
-1. **Credential Isolation** — agent uses ephemeral DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
-2. **Runtime Isolation Checks** — every container fails hard at startup on any security violation
-3. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
-4. **Filesystem Jail** — Go os.OpenRoot at /workspace, traversal blocked at runtime level
-5. **Git Hook Prevention** — 3 structural layers: /dev/null shadow, separated gitdir, core.hooksPath
-6. **Git History Protection** — baseline commit floor prevents erasing pre-existing history
-7. **Network Isolation** — agent on int_net only, no direct internet access
-8. **Repo Isolation** — agent submodule as /workspace; parent repo never visible
-9. **Dual-Layer Auth** — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
-10. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
-11. **MCP Config as Build Artifact** — .mcp.json baked into image, agent can't modify tool registrations
-12. **Non-Root Containers** — UID 1000, cap_drop: ALL on proxy
-13. **Plan Isolation** — plan-server has no access to /workspace, /gitdir, or secrets
-
-See [docs/CONTEXT.md](docs/CONTEXT.md) for detailed architecture and security model.
-
----
+Each sub-repo contains its own `docs/CONTEXT.md` (architecture) and `docs/PLAN.md` (roadmap). See the [workspace interface spec](WORKSPACE_INTERFACE.md) for the standardized structure.
 
 ## Project Structure
 
-The project uses three repos with git submodule boundaries.
-
 ```
-secure-claude/                          # Parent repo — orchestration, infrastructure
+secure-claude/                          # This repo — orchestration, infrastructure
 ├── cluster/
 │   ├── agent/                          ← submodule → secure-claude-agent
 │   ├── planner/                        ← submodule → secure-claude-planner
-│   ├── workspace                       ← symlink → agent/
+│   ├── workspace                       ← symlink → active sub-repo
 │   ├── caddy/                          # Caddy reverse proxy config
 │   ├── proxy/                          # LiteLLM proxy config
 │   ├── docker-compose.yml
-│   ├── Dockerfile.caddy
-│   ├── Dockerfile.claude
-│   ├── Dockerfile.mcp
-│   ├── Dockerfile.plan
-│   ├── Dockerfile.proxy
+│   ├── Dockerfile.*                    # All container images
 │   └── start-cluster.sh
 ├── docs/
-│   ├── CONTEXT.md                      # Architecture and security model
-│   └── PLAN.md                         # Development roadmap
+│   ├── CONTEXT.md                      # Cluster architecture and security model
+│   └── PLAN.md                         # Overall development roadmap
 ├── plans/                              # Plan state files (JSON)
+├── WORKSPACE_INTERFACE.md              # Contract for mountable repos
 ├── run.sh                              # Generate certs, rotate tokens, start cluster
 ├── plan.sh                             # Create a plan (no code execution)
 ├── query.sh                            # Send a query to the agent
@@ -119,16 +54,18 @@ secure-claude/                          # Parent repo — orchestration, infrast
 └── logs.sh                             # Tail container logs
 ```
 
----
+## Security Summary
 
-## Prerequisites
+Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos document their own implementation details. The cluster-level guarantees are:
 
-- Docker Engine with Compose V2
-- Node.js 22+ (for claude login)
-- openssl (for certificate generation)
-- Python 3.12+ with venv (for local tests)
-
----
+1. **Credential Isolation** — agent uses ephemeral DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
+2. **Network Isolation** — claude-server on int_net only, no direct internet access
+3. **Filesystem Jail** — Go os.OpenRoot at /workspace, traversal blocked at runtime level
+4. **Repo Isolation** — active sub-repo as /workspace; parent repo never visible
+5. **Dual-Layer Auth** — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
+6. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
+7. **Non-Root Containers** — UID 1000, cap_drop: ALL on proxy
+8. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
 
 ## Quick Start
 
@@ -160,7 +97,7 @@ claude login
 claude setup-token
 ```
 
-Copy the sk-ant-oat01-... token into .secrets.env as ANTHROPIC_API_KEY.
+Copy the `sk-ant-oat01-...` token into `.secrets.env` as `ANTHROPIC_API_KEY`.
 
 3. Initialize local test environment
 
@@ -181,7 +118,17 @@ Copy the sk-ant-oat01-... token into .secrets.env as ANTHROPIC_API_KEY.
 ./query.sh claude-sonnet-4-6 "work on the current task"
 ```
 
----
+## Switching the Active Workspace
+
+To develop a different sub-repo, update the workspace symlink and the bind mounts in `docker-compose.yml`:
+
+```bash
+# Switch from agent to planner
+cd cluster
+ln -sfn planner workspace
+```
+
+Then update `docker-compose.yml` mount paths (or use the provided mount profiles). The target repo must follow the [workspace interface](WORKSPACE_INTERFACE.md).
 
 ## Operational Commands
 
@@ -193,7 +140,12 @@ Copy the sk-ant-oat01-... token into .secrets.env as ANTHROPIC_API_KEY.
 ./test.sh                         # Run full test suite
 ```
 
----
+## Prerequisites
+
+- Docker Engine with Compose V2
+- Node.js 22+ (for claude login)
+- openssl (for certificate generation)
+- Python 3.12+ with venv (for local tests)
 
 ## Security & Quality Auditing
 
@@ -203,28 +155,13 @@ Copy the sk-ant-oat01-... token into .secrets.env as ANTHROPIC_API_KEY.
 
 | Tool | Focus | Target |
 | :--- | :--- | :--- |
-| pytest | Unit tests | agent/claude/, planner/planner/ |
+| pytest | Unit tests | agent, planner |
 | go test | Unit tests | agent/fileserver/ |
 | pip-audit | CVE scanning | agent + planner requirements.txt |
 | govulncheck | CVE scanning | agent/fileserver/ Go modules |
 | npm audit | CVE scanning | Claude Code JS dependencies |
 | hadolint | Dockerfile linting | All Dockerfile.* |
 | trivy | Misconfiguration | docker-compose.yml + images |
-
----
-
-## Development Status
-
-See [docs/PLAN.md](docs/PLAN.md) for the development roadmap.
-
-- **Phase 1** ✅ Git submodule split + isolation verification
-- **Phase 2** ✅ Git MCP tools + docs access + hook prevention
-- **Phase 2.5** ✅ Planning tool (plan-server + plan_mcp.py)
-- **Phase 3** 🔲 Test runner MCP tool
-- **Phase 4** 🔲 Close the agentic loop (self-developing cycle)
-- **Phase 5** 🔲 Hardening and polish
-
----
 
 ## Credits
 

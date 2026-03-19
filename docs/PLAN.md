@@ -40,22 +40,15 @@ Added plan-then-execute workflow. Task structure inspired by
 
 ## Phase 3: Test Runner MCP Tool
 
-### Tasks
-
-- [ ] Create `cluster/test-runner/` — lives outside agent submodule (Claude can't modify it)
-- [ ] Build Python MCP stdio server that invokes `docker run` with pre-built test images
-- [ ] Python test image: mounts `cluster/agent/claude/`, runs pytest, returns JSON output
-- [ ] Go test image: mounts `cluster/agent/fileserver/`, runs `go test -json`, returns structured output
-- [ ] Add `conftest.py` with autouse network-blocking fixture to agent repo
-- [ ] Register test runner as MCP tool in .mcp.json
-- [ ] Test: query Claude to "run the tests" and verify structured pass/fail output
-
 ### Design
 
 - `docker run` for sibling containers (not Docker-in-Docker)
 - Each language gets its own test container with only its source folder mounted
 - Claude-written tests must be mocked unit tests only — no credentials reachable
 - Test runner needs Docker socket access — document the security implication
+- `cluster/test-runner/` lives in parent repo (Claude can't modify it)
+
+Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
 ---
 
@@ -64,17 +57,12 @@ Added plan-then-execute workflow. Task structure inspired by
 Wire everything together: Claude reads code → plans changes → modifies code →
 runs tests → interprets results → commits. All without human intervention.
 
-### Tasks
-
-- [ ] End-to-end test: plan → execute all tasks → tests pass → committed
-- [ ] Handle edge cases: test failures trigger re-plan, blocked tasks
-- [ ] Add structured logging for the agentic loop
-- [ ] Automate task advancement (loop query.sh until plan complete)
-
 ### Acceptance Criteria
 
 A single `plan.sh` + repeated `query.sh` results in Claude completing all tasks,
 running tests, fixing failures, and committing — with human reviewing only the plan.
+
+Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
 ---
 
@@ -82,8 +70,10 @@ running tests, fixing failures, and committing — with human reviewing only the
 
 - [ ] Resource limits on test runner containers (timeout, memory)
 - [ ] Output sanitization from test runner (strip any leaked env vars)
-- [ ] `append_file` and `replace_in_file` tools (context-lighter file editing)
 - [ ] Tag a release
+
+Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
+[planner PLAN.md](../cluster/planner/docs/PLAN.md)
 
 ---
 
