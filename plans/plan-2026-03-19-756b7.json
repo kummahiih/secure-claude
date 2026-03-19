@@ -1,7 +1,7 @@
 {
   "id": "plan-20260319-105442",
   "goal": "Add three context-efficient file editing tools (grep_files, replace_in_file, append_file) to the Go fileserver REST API, the Python MCP wrapper, and .mcp.json \u2014 all respecting the os.OpenRoot /workspace jail.",
-  "status": "in_progress",
+  "status": "completed",
   "created": "2026-03-19T10:54:42.572197+00:00",
   "tasks": [
     {
@@ -37,7 +37,7 @@
       "action": "Open .mcp.json and add entries for grep_files, replace_in_file, and append_file under the fileserver MCP server's tool list, following the exact same schema/format used by the five existing fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Include correct input schema definitions: grep_files needs {pattern: string, max_results?: integer}, replace_in_file needs {path: string, old_string: string, new_string: string}, append_file needs {path: string, content: string}.",
       "verify": "Run `python -m json.tool .mcp.json` to confirm valid JSON, then run the existing integration test that checks MCP registration (test.sh step 7) and confirm all three new tool names appear.",
       "done": ".mcp.json is valid JSON, contains entries for grep_files, replace_in_file, and append_file, and the integration test that validates MCP tool registration exits 0.",
-      "status": "current"
+      "status": "completed"
     }
   ]
 }

@@ -57,7 +57,9 @@ RUN mkdir -p /home/appuser/sandbox && \
     chown appuser:appgroup /home/appuser/sandbox && \
     chmod 500 /home/appuser/sandbox
 
-# Write MCP config at build time — it's static, not a secret
+# Write MCP config at build time — it's static, not a secret.
+# This is the authoritative runtime config. The agent repo has a
+# reference copy at docs/mcp-tools.json with full tool schemas.
 COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
 {
   "mcpServers": {
