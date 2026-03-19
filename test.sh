@@ -36,33 +36,16 @@ if [ $? -eq 0 ]; then echo "  ✅ Infrastructure config clean"; else echo "$TRIV
 
 
 echo "========================================"
-echo "  SUB-REPOSITORY TESTS"
-echo "========================================"
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/8: Running agent tests..."
-(cd cluster/agent && ./test.sh)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/8: Running planner tests..."
-(cd cluster/planner && ./test.sh)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 5/8: Running tester tests..."
-(cd cluster/tester && ./test.sh)
-
-
-echo "========================================"
 echo "  BUILD + INTEGRATION"
 echo "========================================"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 6/8: Building Containers..."
+echo "[$(date +'%H:%M:%S')] 3/8: Building Containers..."
 (cd cluster && docker-compose build --quiet)
 echo "  ✅ Build complete"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 7/8: Post-Build Security Scans..."
+echo "[$(date +'%H:%M:%S')] 4/8: Post-Build Security Scans..."
 
 echo "[+] Scanning Go deps (govulncheck)..."
 (
@@ -121,6 +104,24 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
     echo "$NPM_OUT" | grep -E '(found|vulnerabilities|severity|Severity)' | tail -5
   fi
 ) || echo "  ⚠️  npm audit section failed"
+
+
+echo "========================================"
+echo "  SUB-REPOSITORY TESTS"
+echo "========================================"
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 5/8: Running agent tests..."
+(cd cluster/agent && ./test.sh)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 6/8: Running planner tests..."
+(cd cluster/planner && ./test.sh)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 7/8: Running tester tests..."
+(cd cluster/tester && ./test.sh)
+
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 8/8: Running Docker Integration Tests..."
