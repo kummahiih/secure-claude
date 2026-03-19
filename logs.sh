@@ -17,6 +17,9 @@ set -e
     echo "=== plan-server ===" && \
     docker-compose logs --tail 100 plan-server && \
     echo "" && \
+    echo "=== tester-server ===" && \
+    docker-compose logs --tail 100 tester-server && \
+    echo "" && \
     echo "=== claude-server ===" && \
     docker-compose logs --tail 300 claude-server && \
     echo "" && \
@@ -32,5 +35,12 @@ set -e
       'for f in $(find /home/appuser/.cache/claude-cli-nodejs -path "*mcp-logs-planner*" -name "*.jsonl" 2>/dev/null | sort | tail -3); do
         echo "--- $f ---"
         tail -20 "$f" 2>/dev/null
-      done' 2>/dev/null || echo "  (no MCP planner logs found)"
+      done' 2>/dev/null || echo "  (no MCP planner logs found)" && \
+    echo "" && \
+    echo "=== MCP tester logs (from Claude Code) ===" && \
+    docker exec claude-server sh -c \
+      'for f in $(find /home/appuser/.cache/claude-cli-nodejs -path "*mcp-logs-tester*" -name "*.jsonl" 2>/dev/null | sort | tail -3); do
+        echo "--- $f ---"
+        tail -20 "$f" 2>/dev/null
+      done' 2>/dev/null || echo "  (no MCP tester logs found)"
 )
