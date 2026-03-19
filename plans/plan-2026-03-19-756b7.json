@@ -26,7 +26,7 @@
       "action": "In files_mcp.py, add three new MCP tool definitions and handler functions mirroring the new REST endpoints: (1) grep_files(pattern: str, max_results: int = 100) \u2192 POST /grep, returns formatted results as 'file:lineno: line' strings; (2) replace_in_file(path: str, old_string: str, new_string: str) \u2192 POST /replace, returns the replacements_made count; (3) append_file(path: str, content: str) \u2192 POST /append, returns bytes_written. Follow the exact same pattern as existing tools (error handling, HTTPS to mcp-server:8443, MCP_API_TOKEN auth header). In test_files_mcp.py, add unit tests for each new function: mock the HTTPS call, assert correct endpoint/payload, assert correct return value, and assert HTTPError propagation.",
       "verify": "Run `python -m pytest test_files_mcp.py -v` \u2014 all existing tests still pass and new tests for grep_files, replace_in_file, and append_file pass.",
       "done": "`python -m pytest test_files_mcp.py` exits 0 with no failures and the three new tool names appear in the MCP server's tool list when files_mcp.py is run with `--list` or equivalent introspection.",
-      "status": "current"
+      "status": "completed"
     },
     {
       "id": "t3",
@@ -37,7 +37,7 @@
       "action": "Open .mcp.json and add entries for grep_files, replace_in_file, and append_file under the fileserver MCP server's tool list, following the exact same schema/format used by the five existing fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Include correct input schema definitions: grep_files needs {pattern: string, max_results?: integer}, replace_in_file needs {path: string, old_string: string, new_string: string}, append_file needs {path: string, content: string}.",
       "verify": "Run `python -m json.tool .mcp.json` to confirm valid JSON, then run the existing integration test that checks MCP registration (test.sh step 7) and confirm all three new tool names appear.",
       "done": ".mcp.json is valid JSON, contains entries for grep_files, replace_in_file, and append_file, and the integration test that validates MCP tool registration exits 0.",
-      "status": "pending"
+      "status": "current"
     }
   ]
 }
