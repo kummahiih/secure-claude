@@ -74,6 +74,7 @@ services:
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - MCP_SERVER_URL=https://mcp-server:8443
       - PLAN_SERVER_URL=https://plan-server:8443
+      - TESTER_SERVER_URL=https://tester-server:8443
       - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt        # for Node.js/Claude Code
       - CURL_CA_BUNDLE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
@@ -90,6 +91,7 @@ services:
     depends_on:
       - mcp-server
       - plan-server
+      - tester-server
       - proxy
     restart: unless-stopped
 
@@ -126,6 +128,21 @@ services:
     restart: unless-stopped
 
 
+
+  tester-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.tester
+    container_name: tester-server
+    user: "1000:1000"
+    environment:
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - SSL_CERT_FILE=/app/certs/ca.crt
+    volumes:
+      - ./workspace:/workspace:ro
+    networks:
+      - int_net
+    restart: unless-stopped
 
 networks:
   ext_net:

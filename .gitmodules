@@ -4,3 +4,6 @@
 [submodule "cluster/planner"]
 	path = cluster/planner
 	url = https://github.com/kummahiih/secure-claude-planner
+[submodule "cluster/tester"]
+	path = cluster/tester
+	url = https://github.com/kummahiih/secure-claude-tester.git

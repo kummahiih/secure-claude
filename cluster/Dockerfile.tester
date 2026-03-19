@@ -1,0 +1,90 @@
+# Dockerfile.tester — Test runner server for /workspace/test.sh
+#
+# Same three-stage pattern as Dockerfile.mcp (fileserver):
+#   Stage 1: Build Go binary
+#   Stage 2: Sign TLS certificate with internal CA
+#   Stage 3: Runtime image with test tooling
+#
+# Unlike the fileserver, the runtime image includes Go + Python + pytest
+# so that test.sh can invoke `go test` and `python -m pytest` directly.
+# No Docker socket access required — tests run as subprocesses.
+#
+# The workspace under test is mounted read-only at /workspace.
+# POST /run  executes /workspace/test.sh (or TEST_SCRIPT env override).
+# GET /results returns the last run outcome as JSON.
+# GET /health unauthenticated healthcheck.
+
+# Stage 1: Go Builder
+FROM golang:1.26.1-alpine AS builder
+WORKDIR /app
+COPY cluster/tester/main.go cluster/tester/go.mod ./
+RUN go build -o tester-server main.go
+
+# Stage 2: Certificate Signer
+FROM alpine:3.23.3 AS signer
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out tester.key 2048 && \
+    openssl req -new -key tester.key -out tester.csr -subj "/CN=tester-server" && \
+    echo "subjectAltName=DNS:tester-server,DNS:localhost,IP:127.0.0.1" > tester.ext && \
+    openssl x509 -req -in tester.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out tester.crt -days 365 -sha256 -extfile tester.ext
+
+# Stage 3: Runtime with test tooling
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system deps + Go toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        tar \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG GO_VERSION=1.26.1
+RUN curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz" \
+    | tar -C /usr/local -xz \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# Install Python test tooling
+RUN pip install --no-cache-dir pytest requests
+
+# Create non-root user
+RUN addgroup --gid 1000 appgroup && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+
+WORKDIR /app
+
+# Copy Go binary from builder
+COPY --from=builder /app/tester-server .
+
+# Copy TLS certs
+COPY --from=signer --chown=appuser:appgroup /certs/tester.crt /app/certs/tester.crt
+COPY --from=signer --chown=appuser:appgroup /certs/tester.key /app/certs/tester.key
+COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
+
+RUN chmod 600 /app/certs/tester.key
+
+# Copy entrypoint with isolation checks
+COPY --chown=appuser:appgroup cluster/tester/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Go env for test runs
+ENV GOPATH=/home/appuser/go
+ENV PATH="/usr/local/go/bin:/home/appuser/go/bin:${PATH}"
+RUN mkdir -p /home/appuser/go && chown -R appuser:appgroup /home/appuser
+
+USER appuser
+EXPOSE 8443
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "tester-server" || exit 1
