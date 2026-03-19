@@ -4,9 +4,8 @@ set -euo pipefail
 echo "[$(date +'%H:%M:%S')] Starting automated test suite..."
 . venv/bin/activate
 
-
 # Generate any missing files via setup
-bash ./run.sh --setup-only 
+bash ./run.sh --setup-only
 
 # Provide completely fake tokens so the SDKs and Docker Compose don't crash on boot
 export MCP_API_TOKEN="integration-test-mcp-token"
@@ -15,51 +14,17 @@ export ANTHROPIC_API_KEY="dummy-anthropic-key"
 export DYNAMIC_AGENT_KEY="dummy-dynaic-key"
 
 
+echo "========================================"
+echo "  CLUSTER-LEVEL TESTS"
+echo "========================================"
+
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/8: Validating Caddy Edge Router..."
+echo "[$(date +'%H:%M:%S')] 1/7: Validating Caddy Edge Router..."
 (bash ./cluster/caddy/caddy_test.sh 2>&1 | tail -3)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/8: Running Golang MCP Server Tests..."
-(cd cluster/agent/fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/8: Running Python Claude Tests..."
-(source ./venv/bin/activate && cd cluster/agent/claude && pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3.5/8: Running Python Planner Tests..."
-(source ./venv/bin/activate && cd cluster/planner/planner && pytest plan_server_test.py plan_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/8: Running Dependency Security Scans..."
-
-echo "[+] Scanning Go Fileserver (govulncheck)..."
-(cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | tail -5)
-
-echo "[+] Scanning Python Agent (pip-audit)..."
-(cd cluster && \
-    docker run --rm \
-    -e PIP_ROOT_USER_ACTION=ignore \
-    -v "$(pwd)":/app \
-    -w /app \
-    python:3.11-slim /bin/bash -c \
-    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r agent/claude/requirements.txt" 2>&1 | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' || echo "  ✅ pip-audit clean"
-)
-
-echo "[+] Scanning Python Planner (pip-audit)..."
-(cd cluster && \
-    docker run --rm \
-    -e PIP_ROOT_USER_ACTION=ignore \
-    -v "$(pwd)":/app \
-    -w /app \
-    python:3.11-slim /bin/bash -c \
-    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r planner/planner/requirements.txt" 2>&1 | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' || echo "  ✅ pip-audit clean"
-)
-
+echo "[$(date +'%H:%M:%S')] 2/7: Lint Dockerfiles (Hadolint)..."
 DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan")
-
-echo "[+] Lint Dockerfiles (Hadolint)"
 for df in "${DOCKERFILES[@]}"; do
     RESULT=$(docker run --rm -i hadolint/hadolint:v2.12.0 < cluster/"$df" 2>&1)
     if [ $? -eq 0 ]; then echo "  ✅ $df"; else echo "  ⚠️  $df:"; echo "$RESULT"; EXIT_CODE=1; fi
@@ -69,13 +34,31 @@ echo "[+] Scan Docker Compose Configuration (Trivy)"
 TRIVY_OUT=$(cd cluster && docker run --rm -v "$(pwd)":/app -w /app aquasec/trivy config . 2>&1)
 if [ $? -eq 0 ]; then echo "  ✅ Infrastructure config clean"; else echo "$TRIVY_OUT" | grep -E '(CRITICAL|HIGH|MEDIUM|FAIL)'; EXIT_CODE=1; fi
 
+
+echo "========================================"
+echo "  SUB-REPOSITORY TESTS"
+echo "========================================"
+
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 5/8: Building Containers..."
+echo "[$(date +'%H:%M:%S')] 3/7: Running agent tests..."
+(cd cluster/agent && ./test.sh)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 4/7: Running planner tests..."
+(cd cluster/planner && ./test.sh)
+
+
+echo "========================================"
+echo "  BUILD + INTEGRATION"
+echo "========================================"
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 5/7: Building Containers..."
 (cd cluster && docker-compose build --quiet)
 echo "  ✅ Build complete"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 6/8: Post-Build Security Scans..."
+echo "[$(date +'%H:%M:%S')] 6/7: Post-Build Security Scans..."
 
 echo "[+] Scanning Claude Code JS deps (npm audit)..."
 (
@@ -97,7 +80,7 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
 ) || echo "  ⚠️  npm audit section failed"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 7/8: Running Docker Integration Tests..."
+echo "[$(date +'%H:%M:%S')] 7/7: Running Docker Integration Tests..."
 
 # Create plans directory if needed
 mkdir -p plans
@@ -162,8 +145,7 @@ else
   exit 1
 fi
 
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 8/8: Plan-server isolation verification..."
+echo "$(date +'%H:%M:%S') Plan-server isolation verification..."
 
 echo "$(date +'%H:%M:%S') Checking plan-server cannot see workspace..."
 WORKSPACE_CHECK=$(docker exec plan-server ls /workspace 2>&1 || true)
@@ -200,4 +182,4 @@ echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down 2>/dev/null)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] ✅ All unit, security, and integration tests passed!"
+echo "[$(date +'%H:%M:%S')] ✅ All cluster, sub-repository, and integration tests passed!"
