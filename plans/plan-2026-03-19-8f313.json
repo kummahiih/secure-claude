@@ -1,0 +1,69 @@
+{
+  "id": "plan-20260319-200159",
+  "goal": "Add a Dockerfile.test (readonly mount, non-root, runs test.sh) and a 'tester' MCP service modelled after the fileserver: a Go REST server (tester/), a Python stdio wrapper (claude/tester_mcp.py), unit tests for both, and full system integration (.mcp.json, docs/mcp-tools.json, test.sh, runenv.py).",
+  "status": "in_progress",
+  "created": "2026-03-19T20:01:59.513776+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Create Dockerfile.test",
+      "files": [
+        "Dockerfile.test"
+      ],
+      "action": "Create Dockerfile.test at the project root. Use python:3.12-slim as the base. Install bash, curl, and Go (via the golang Debian package or official tarball). Create a non-root user with UID 1000 named 'tester' (useradd -u 1000 -m tester). Set WORKDIR /project. Do NOT COPY anything \u2014 the project directory is supplied at runtime via a read-only bind mount at /project. Set USER tester. Set CMD [\"bash\", \"/project/test.sh\"]. Add a comment block at the top explaining: the project root must be bind-mounted at /project:ro, the container runs as UID 1000, and stdout/stderr is the structured test output parsed by the tester MCP service.",
+      "verify": "Run: docker build -f Dockerfile.test -t test-runner . && docker run --rm -v $(pwd):/project:ro test-runner id 2>&1 | grep 'uid=1000'. Confirm the build succeeds and the runtime user is UID 1000.",
+      "done": "Dockerfile.test exists at the project root, builds without error, and the container runs as UID 1000 with /project mounted from outside.",
+      "status": "current"
+    },
+    {
+      "id": "t2",
+      "name": "Create tester Go REST server",
+      "files": [
+        "tester/main.go",
+        "tester/go.mod",
+        "tester/entrypoint.sh"
+      ],
+      "action": "Create tester/ directory with three files. (1) go.mod: module name 'tester', go 1.26.1, no external deps. (2) entrypoint.sh: same pattern as fileserver/entrypoint.sh \u2014 block ANTHROPIC_API_KEY, CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY; require MCP_API_TOKEN; exec /app/tester-server. (3) main.go: a Go HTTP server on :8443 with TLS (certs at /app/certs/tester.crt and /app/certs/tester.key), Bearer token auth via MCP_API_TOKEN (same verifyToken pattern as fileserver), and two handlers: POST /run \u2014 executes 'docker run --rm -v <WORKSPACE_HOST_PATH>:/project:ro <TESTER_IMAGE>' via exec.Command, captures combined stdout+stderr, stores the result (exit code, raw output, timestamp, parsed status) in an in-memory struct protected by sync.Mutex, returns JSON {\"status\":\"started\"}; GET /results \u2014 returns the stored result as JSON {\"status\":\"pass\"|\"fail\"|\"pending\", \"exit_code\":N, \"timestamp\":\"...\", \"output\":\"...\"}. Read WORKSPACE_HOST_PATH and TESTER_IMAGE from env vars (default TESTER_IMAGE to 'test-runner'). Use setupRouter(token) pattern for testability. Add a /health endpoint returning 200 with no auth.",
+      "verify": "cd tester && go build ./... must succeed with zero errors. Inspect main.go to confirm POST /run, GET /results, /health, verifyToken, sync.Mutex, and TLS setup are all present.",
+      "done": "tester/main.go, tester/go.mod, and tester/entrypoint.sh exist; go build ./... in tester/ exits 0.",
+      "status": "pending"
+    },
+    {
+      "id": "t3",
+      "name": "Create tester Go unit tests",
+      "files": [
+        "tester/tester_test.go"
+      ],
+      "action": "Create tester/tester_test.go following the same style as fileserver/mcp_test.go. Use net/http/httptest. Tests to include: (1) GET /results with no prior run returns 200 with status=pending. (2) POST /run with valid auth returns 202 or 200 with {status:started}. (3) GET /results after a run returns JSON with exit_code and output fields. (4) POST /run without auth returns 401. (5) GET /results without auth returns 401. (6) GET /health returns 200 with no auth. For the /run tests, mock the docker command by injecting a configurable exec function (or use a fake command that exits 0) so no real Docker is required. Use a package-level variable or functional option for the exec function so it can be replaced in tests.",
+      "verify": "cd tester && go test tester_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)'  must show all tests PASS.",
+      "done": "tester/tester_test.go exists and all go test cases pass.",
+      "status": "pending"
+    },
+    {
+      "id": "t4",
+      "name": "Create Python MCP wrapper and unit tests",
+      "files": [
+        "claude/tester_mcp.py",
+        "claude/tester_mcp_test.py"
+      ],
+      "action": "Create two files. (1) claude/tester_mcp.py: follow the exact structure of files_mcp.py. Import from runenv: TESTER_SERVER_URL and MCP_API_TOKEN. Register an MCP Server named 'tester'. Expose two tools via list_tools(): 'run_tests' (no required inputs, description: 'Trigger a test run inside the isolated test container. Returns immediately with status started.') and 'get_test_results' (no required inputs, description: 'Get the results of the last test run as structured JSON with fields: status (pass/fail/pending), exit_code, timestamp, output.'). In _dispatch(): run_tests calls POST {TESTER_SERVER_URL}/run with Bearer MCP_API_TOKEN header and verify=/app/certs/ca.crt; get_test_results calls GET {TESTER_SERVER_URL}/results. Handle 401 as PermissionError, 503/500 as RuntimeError. Implement call_tool() and the asyncio stdio_server main() exactly as in files_mcp.py. (2) claude/tester_mcp_test.py: follow the exact style of files_mcp_test.py. Set os.environ stubs for MCP_API_TOKEN, MCP_SERVER_URL, TESTER_SERVER_URL, AGENT_API_TOKEN. Tests: run_tests success (200 \u2192 returns started text), run_tests 401 raises PermissionError, run_tests connection failure raises Exception, get_test_results success (200 with JSON body containing status/exit_code/output), get_test_results 500 raises RuntimeError, get_test_results connection failure raises Exception, unknown tool raises ValueError, call_tool wraps errors as isError=True.",
+      "verify": "cd claude && python -m pytest tester_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR)' must show all PASSED.",
+      "done": "claude/tester_mcp.py and claude/tester_mcp_test.py exist; all pytest tests pass.",
+      "status": "pending"
+    },
+    {
+      "id": "t5",
+      "name": "Integrate tester into the system",
+      "files": [
+        "claude/runenv.py",
+        ".mcp.json",
+        "docs/mcp-tools.json",
+        "test.sh"
+      ],
+      "action": "Four additive changes, no deletions or modifications to existing entries. (1) claude/runenv.py: append at the bottom a new block: TESTER_SERVER_URL = os.getenv('TESTER_SERVER_URL', 'https://tester-server:8443') with a logging.error guard if missing, matching the pattern used for MCP_SERVER_URL and PLAN_SERVER_URL. (2) .mcp.json: add a new 'tester' key inside mcpServers (after the existing entries) with type stdio, command python, args [\"/app/tester_mcp.py\"], and tool schemas for run_tests and get_test_results (both with empty inputSchema properties objects, no required fields). (3) docs/mcp-tools.json: add a 'tester' entry in the mcpServers object matching the same structure as the other entries, with the two tool descriptors. (4) test.sh: append two new lines at the bottom \u2014 one that runs Go tester unit tests: (cd tester && go test tester_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)') \u2014 and one that runs the Python tester MCP wrapper tests: (cd claude && python -m pytest tester_mcp_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)').",
+      "verify": "grep 'tester' .mcp.json returns the new entry; grep 'TESTER_SERVER_URL' claude/runenv.py returns the new line; grep 'tester' test.sh returns the two new test commands; grep 'tester' docs/mcp-tools.json returns the new entry.",
+      "done": "All four files contain the new tester additions; bash -n test.sh (syntax check) passes; python -c 'import ast; ast.parse(open(\"claude/runenv.py\").read())' passes.",
+      "status": "pending"
+    }
+  ]
+}
