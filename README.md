@@ -179,6 +179,7 @@ secrets needed).
 ./run.sh                          # Start cluster (generates certs + tokens)
 ./plan.sh <model> "<goal>"        # Create a plan (no code execution)
 ./query.sh <model> "<query>"      # Send a query / execute a task
+./dev-loop.sh <model> <max-iter> [poll-interval]  # Automated plan-execute loop (runs until complete or blocked)
 ./logs.sh                         # Tail all container logs
 ./test.sh                         # Run unit tests (no Docker/network needed)
 ./test-integration.sh             # CVE audits + Docker integration tests
