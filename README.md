@@ -139,15 +139,37 @@ Copy the `sk-ant-oat01-...` token into `.secrets.env` as `ANTHROPIC_API_KEY`.
 
 ## Switching the Active Workspace
 
-To develop a different sub-repo, update the workspace symlink and the bind mounts in `docker-compose.yml`:
+The workspace is a symlink at `cluster/workspace`. Docker Compose mounts it
+via `./workspace`, so changing the symlink target is all that's needed — no
+`docker-compose.yml` edits required.
+
+To develop a different sub-repo:
 
 ```bash
-# Switch from agent to planner
 cd cluster
-ln -sfn planner workspace
+ln -sfn planner workspace      # switch from agent to planner
 ```
 
-Then update `docker-compose.yml` mount paths (or use the provided mount profiles). The target repo must follow the [workspace interface](docs/WORKSPACE_INTERFACE.md).
+Restart the cluster after switching. The target repo must follow the [workspace interface](docs/WORKSPACE_INTERFACE.md).
+
+### Self-development: mounting secure-claude as its own workspace
+
+To have the agent work on the parent repo itself, clone a separate working
+copy and point the symlink at it:
+
+```bash
+# Create a working copy (separate from the live cluster source)
+git clone --recurse-submodules https://github.com/kummahiih/secure-claude /path/to/secure-claude-work
+
+# Point the workspace symlink at the working copy
+cd /path/to/secure-claude/cluster
+ln -sfn /path/to/secure-claude-work workspace
+```
+
+The working copy satisfies the workspace interface out of the box — it has
+`test.sh`, `docs/CONTEXT.md`, `docs/PLAN.md`, and `README.md`. The tester-server
+will execute the working copy's `test.sh` (unit tests only, no Docker or
+secrets needed).
 
 ## Operational Commands
 
