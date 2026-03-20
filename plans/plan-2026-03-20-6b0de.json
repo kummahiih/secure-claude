@@ -1,0 +1,52 @@
+{
+  "id": "plan-20260320-172739",
+  "goal": "Update all documentation to reflect: (1) gitdir mount is now './workspace/.git:/gitdir', (2) mcp-server .git shadow is now a tmpfs mount instead of /dev/null, (3) test-integration.sh (not \"parent test.sh\") runs CVE audits and Docker integration tests.",
+  "status": "completed",
+  "created": "2026-03-20T17:27:39.066354+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Update docs/CONTEXT.md mounts + security layer + test split",
+      "files": [
+        "docs/CONTEXT.md"
+      ],
+      "action": "Make three targeted replacements:\n1. In 'Volume mounts on claude-server' table: change '| ../.git/modules/cluster/\\<sub-repo\\> | /gitdir | rw | Git data for add/commit |' \u2192 '| ./workspace/.git | /gitdir | rw | Git data for add/commit |'\n2. In 'Volume mounts on mcp-server' table: change '| /dev/null | /workspace/.git | ro | Shadows .git \u2014 structural hook prevention |' \u2192 '| tmpfs | /workspace/.git | ro,size=0 | Shadows .git via tmpfs \u2014 structural hook prevention |'\n3. In 'Core Security Principles': change '6. Git hook prevention \u2014 /dev/null shadow + separated gitdir + core.hooksPath=/dev/null' \u2192 '6. Git hook prevention \u2014 tmpfs shadow + separated gitdir + core.hooksPath=/dev/null'\n4. In 'Test Suite' section: change '- **Parent test.sh** \u2014 security scans (need network for vuln DBs) + integration tests (need Docker)' \u2192 '- **test-integration.sh** \u2014 security scans (need network for vuln DBs) + integration tests (need Docker)'",
+      "verify": "grep './workspace/.git' docs/CONTEXT.md && grep 'tmpfs' docs/CONTEXT.md && grep 'test-integration.sh' docs/CONTEXT.md | grep -v '#' && ! grep '/dev/null.*workspace.*git\\|../.git/modules' docs/CONTEXT.md && ! grep 'Parent test.sh' docs/CONTEXT.md",
+      "done": "All four replacements confirmed present and old strings absent in docs/CONTEXT.md.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Update docs/PLAN.md /dev/null shadow + parent test.sh references",
+      "files": [
+        "docs/PLAN.md"
+      ],
+      "action": "Make two targeted replacements:\n1. In Phase 2 line: change '(/dev/null shadow, separated gitdir, core.hooksPath), baseline commit floor,' \u2192 '(tmpfs shadow, separated gitdir, core.hooksPath), baseline commit floor,'\n2. In Phase 3 line: change 'parent test.sh = security scans + integration' \u2192 'test-integration.sh = security scans + integration'\n3. In Risk Register last row: change 'Security scans run in parent test.sh with network access' \u2192 'Security scans run in test-integration.sh with network access'",
+      "verify": "grep 'tmpfs shadow' docs/PLAN.md && grep 'test-integration.sh' docs/PLAN.md | grep -v '^#' && ! grep '/dev/null shadow' docs/PLAN.md && ! grep 'parent test.sh' docs/PLAN.md",
+      "done": "All three replacements confirmed present and old strings absent in docs/PLAN.md.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Update cluster/agent/docs/CONTEXT.md /dev/null shadow reference",
+      "files": [
+        "cluster/agent/docs/CONTEXT.md"
+      ],
+      "action": "In the 'Git Hook Prevention (3 layers)' section, replace:\n'1. mcp-server: `/dev/null` shadow on `.git` \u2014 fileserver can't see git data'\nwith:\n'1. mcp-server: `tmpfs` shadow on `.git` (ro, size=0) \u2014 fileserver can't see git data'",
+      "verify": "grep 'tmpfs.*shadow\\|shadow.*tmpfs' cluster/agent/docs/CONTEXT.md && ! grep '/dev/null.*shadow' cluster/agent/docs/CONTEXT.md",
+      "done": "The /dev/null shadow reference in cluster/agent/docs/CONTEXT.md is replaced with tmpfs and old string is absent.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update cluster/agent/docs/PLAN.md /dev/null shadow + parent test.sh references",
+      "files": [
+        "cluster/agent/docs/PLAN.md"
+      ],
+      "action": "Make two targeted replacements:\n1. In Phase 2 line: change '3-layer git hook prevention (/dev/null shadow, separated gitdir, core.hooksPath)' \u2192 '3-layer git hook prevention (tmpfs shadow, separated gitdir, core.hooksPath)'\n2. In Phase 3 line: change 'those run in parent test.sh with network' \u2192 'those run in parent test-integration.sh with network'",
+      "verify": "grep 'tmpfs shadow' cluster/agent/docs/PLAN.md && grep 'test-integration.sh' cluster/agent/docs/PLAN.md && ! grep '/dev/null shadow' cluster/agent/docs/PLAN.md && ! grep 'parent test\\.sh' cluster/agent/docs/PLAN.md",
+      "done": "Both replacements confirmed present and old strings absent in cluster/agent/docs/PLAN.md.",
+      "status": "completed"
+    }
+  ]
+}

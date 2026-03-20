@@ -1,7 +1,7 @@
 {
   "id": "plan-20260320-132340",
   "goal": "Add upstream auth-error detection to server.py: a _check_upstream_auth_error() helper, calls in /ask and /plan, HTTPException propagation guard, and full unit tests for all new behaviour.",
-  "status": "in_progress",
+  "status": "completed",
   "created": "2026-03-20T13:23:40.984255+00:00",
   "tasks": [
     {
@@ -57,7 +57,7 @@
       "action": "In tests/test_server.py, add two tests using the FastAPI TestClient and `unittest.mock.patch('subprocess.run')`: (1) test_ask_returns_502_on_oauth_stderr \u2014 mock subprocess.run to return a CompletedProcess with returncode=1 and stderr containing `'OAuth token has expired'`; POST to /ask with a valid bearer token and assert the response status code is 502; (2) test_plan_returns_502_on_oauth_stderr \u2014 identical setup but POST to /plan. Both tests must use whatever auth header/token the existing tests use.",
       "verify": "Run `pytest tests/test_server.py -k '502_on_oauth' -v` and confirm both new tests pass.",
       "done": "Two endpoint tests (one for /ask, one for /plan) exist in tests/test_server.py, mock subprocess stderr with the OAuth marker, and both assert HTTP 502 in the response.",
-      "status": "current"
+      "status": "completed"
     }
   ]
 }
