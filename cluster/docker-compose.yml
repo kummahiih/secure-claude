@@ -84,8 +84,8 @@ services:
       - DOCS_DIR=/docs                               # docs_mcp.py reads from here
     volumes:
       - ./workspace:/workspace:ro                    # Source files (read-only — writes go through MCP)
-      - ../.git/modules/cluster/agent:/gitdir          # Git data — writable for add/commit; isolated from MCP fileserver
-      - ../docs:/docs:ro                             # Project docs — read-only for agent guidance
+      - ./workspace/.git:/gitdir                     # Git data — follows workspace symlink
+      - ./workspace/docs:/docs:ro                    # Project docs — read-only for agent guidance
     networks:
       - int_net
     depends_on:
