@@ -74,6 +74,23 @@ Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos docu
 8. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
 9. **Test Isolation** — tester-server runs tests as subprocesses with workspace mounted read-only
 
+
+## Switching the Active Workspace
+
+The workspace is a symlink at `cluster/workspace`. Docker Compose mounts it
+via `./workspace`, so changing the symlink target is all that's needed — no
+`docker-compose.yml` edits required.
+
+To develop a different sub-repo:
+
+```bash
+cd cluster
+ln -sfn planner workspace      # switch from agent to planner
+```
+
+Restart the cluster after switching. The target repo must follow the [workspace interface](docs/WORKSPACE_INTERFACE.md).
+
+
 ## Quick Start
 
 1. Clone with submodules
@@ -136,21 +153,6 @@ Copy the `sk-ant-oat01-...` token into `.secrets.env` as `ANTHROPIC_API_KEY`.
 ```bash
 ./query.sh claude-sonnet-4-6 "Use run_tests to start a test run, wait 30 seconds, then use get_test_results to check the outcome."
 ```
-
-## Switching the Active Workspace
-
-The workspace is a symlink at `cluster/workspace`. Docker Compose mounts it
-via `./workspace`, so changing the symlink target is all that's needed — no
-`docker-compose.yml` edits required.
-
-To develop a different sub-repo:
-
-```bash
-cd cluster
-ln -sfn planner workspace      # switch from agent to planner
-```
-
-Restart the cluster after switching. The target repo must follow the [workspace interface](docs/WORKSPACE_INTERFACE.md).
 
 ### Self-development: mounting secure-claude as its own workspace
 
