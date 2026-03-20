@@ -27,7 +27,7 @@ Any repository mounted as the active workspace in secure-claude must follow this
 
 Each workspace repo must provide a `test.sh` at its root. The tester-server
 container executes it via `POST /run` and captures the output. The parent repo's
-test suite also calls it for whatever workspace is currently active.
+`test.sh` also calls it for whatever workspace is currently active.
 
 Requirements:
 - Must be executable (`chmod +x test.sh`)
@@ -36,7 +36,7 @@ Requirements:
 - Must run unit tests for all languages in the repo
 - Must not require network access (runs inside network-isolated tester-server)
 - Must not require any secrets or API tokens (use mocks/fakes with defaults)
-- Must not run security/vulnerability scans (those run in the parent test.sh which has network)
+- Must not run security/vulnerability scans (those run in `test-integration.sh`)
 - Should complete within 120 seconds
 
 Example for a Python + Go repo:
@@ -72,8 +72,17 @@ go test -v ./...
 
 Vulnerability scanning (govulncheck, pip-audit, npm audit) requires network
 access to fetch fresh vulnerability databases. These scans are centralized in
-the parent repo's `test.sh` which runs on the host with network access. Sub-repo
-`test.sh` files must not include security scans.
+the parent repo's `test-integration.sh` which runs on the host with network and
+Docker socket access. Sub-repo `test.sh` files must not include security scans.
+
+### Parent repo test split
+
+The parent repo has two test scripts:
+
+| Script | Requires | Contents |
+| :--- | :--- | :--- |
+| `test.sh` | Go, Python/pytest | Sub-repo unit tests only — runnable from a fresh clone |
+| `test-integration.sh` | Docker, network, openssl | CVE audits, Docker builds, cluster integration tests |
 
 ## How Mounting Works
 
@@ -106,3 +115,21 @@ tester MCP tools (`run_tests`, `get_test_results`).
 The tester container includes Go, Python, pytest, and common test dependencies
 pre-installed. Tests run as the `appuser` (UID 1000) with no network access
 beyond the internal Docker network.
+
+## Mounting the Parent Repo as Workspace
+
+To have the agent work on secure-claude itself (self-development), clone the
+repo and mount it as the workspace:
+
+```bash
+# Clone into a working copy separate from the live cluster source
+git clone --recurse-submodules https://github.com/kummahiih/secure-claude /path/to/secure-claude-work
+
+# Point the workspace symlink at the working copy
+cd /path/to/secure-claude/cluster
+ln -sfn /path/to/secure-claude-work workspace
+```
+
+Then update `docker-compose.yml` bind mounts to point at the working copy,
+or use the symlink. The working copy must follow this interface spec — it
+already does since it has `test.sh`, `docs/CONTEXT.md`, and `docs/PLAN.md`.

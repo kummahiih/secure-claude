@@ -20,7 +20,7 @@ Host / Network
                └─> /workspace:ro (bind mount → active sub-repo)
 ```
 
-Six containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](WORKSPACE_INTERFACE.md).
+Six containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](docs/WORKSPACE_INTERFACE.md).
 
 ## Sub-Repositories
 
@@ -30,7 +30,7 @@ Six containers orchestrated by Docker Compose. The `/workspace` mount is swappab
 | [secure-claude-planner](cluster/planner/) | Plan-server REST API for task state management | [README](cluster/planner/README.md) |
 | [secure-claude-tester](cluster/tester/) | Tester-server REST API for running workspace tests | [README](cluster/tester/README.md) |
 
-Each sub-repo contains its own `docs/CONTEXT.md` (architecture) and `docs/PLAN.md` (roadmap). See the [workspace interface spec](WORKSPACE_INTERFACE.md) for the standardized structure.
+Each sub-repo contains its own `docs/CONTEXT.md` (architecture) and `docs/PLAN.md` (roadmap). See the [workspace interface spec](docs/WORKSPACE_INTERFACE.md) for the standardized structure.
 
 ## Project Structure
 
@@ -48,13 +48,15 @@ secure-claude/                          # This repo — orchestration, infrastru
 │   └── start-cluster.sh
 ├── docs/
 │   ├── CONTEXT.md                      # Cluster architecture and security model
+│   ├── WORKSPACE_INTERFACE.md          # Contract for mountable repos
 │   └── PLAN.md                         # Overall development roadmap
-├── plans/                              # Plan state files (JSON)
-├── WORKSPACE_INTERFACE.md              # Contract for mountable repos
+├── plans/
+│   └── *.json                          # Plan state files
 ├── run.sh                              # Generate certs, rotate tokens, start cluster
 ├── plan.sh                             # Create a plan (no code execution)
 ├── query.sh                            # Send a query to the agent
-├── test.sh                             # Full test suite
+├── test.sh                             # Unit tests (offline, no Docker needed)
+├── test-integration.sh                 # CVE audits, Docker builds, integration tests
 └── logs.sh                             # Tail container logs
 ```
 
@@ -110,20 +112,26 @@ Copy the `sk-ant-oat01-...` token into `.secrets.env` as `ANTHROPIC_API_KEY`.
 ./init_build.sh
 ```
 
-4. Start the cluster
+4. Run unit tests (no Docker or secrets required)
+
+```bash
+./test.sh
+```
+
+5. Start the cluster
 
 ```bash
 ./run.sh
 ```
 
-5. Create a plan and execute it
+6. Create a plan and execute it
 
 ```bash
 ./plan.sh claude-sonnet-4-6 "add input validation to the read endpoint"
 ./query.sh claude-sonnet-4-6 "work on the current task"
 ```
 
-6. Run tests via the agent
+7. Run tests via the agent
 
 ```bash
 ./query.sh claude-sonnet-4-6 "Use run_tests to start a test run, wait 30 seconds, then use get_test_results to check the outcome."
@@ -139,7 +147,7 @@ cd cluster
 ln -sfn planner workspace
 ```
 
-Then update `docker-compose.yml` mount paths (or use the provided mount profiles). The target repo must follow the [workspace interface](WORKSPACE_INTERFACE.md).
+Then update `docker-compose.yml` mount paths (or use the provided mount profiles). The target repo must follow the [workspace interface](docs/WORKSPACE_INTERFACE.md).
 
 ## Operational Commands
 
@@ -148,7 +156,8 @@ Then update `docker-compose.yml` mount paths (or use the provided mount profiles
 ./plan.sh <model> "<goal>"        # Create a plan (no code execution)
 ./query.sh <model> "<query>"      # Send a query / execute a task
 ./logs.sh                         # Tail all container logs
-./test.sh                         # Run full test suite
+./test.sh                         # Run unit tests (no Docker/network needed)
+./test-integration.sh             # CVE audits + Docker integration tests
 ```
 
 ## Prerequisites
@@ -161,7 +170,8 @@ Then update `docker-compose.yml` mount paths (or use the provided mount profiles
 ## Security & Quality Auditing
 
 ```bash
-./test.sh
+./test.sh                         # Unit tests — runnable from a fresh clone
+./test-integration.sh             # Full security + integration suite
 ```
 
 | Tool | Focus | Target |
