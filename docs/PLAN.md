@@ -18,7 +18,7 @@ via DYNAMIC_AGENT_KEY rename, MCP config as build artifact.
 ### Phase 2 ✅ Git MCP Tools + Docs Access
 
 Added git_mcp.py (6 tools), docs_mcp.py (2 tools), 3-layer git hook prevention
-(/dev/null shadow, separated gitdir, core.hooksPath), baseline commit floor,
+(tmpfs shadow, separated gitdir, core.hooksPath), baseline commit floor,
 25 git tool tests.
 
 ### Phase 2.5 ✅ Planning Tool
@@ -47,7 +47,7 @@ Added tester-server as 6th container — a Go REST server that runs
 - Dockerfile.tester: 3-stage build (Go binary + TLS cert + runtime with Go/Python test tooling)
 - Workspace mounted read-only — tests cannot modify source
 - Concurrent run rejection (409 Conflict)
-- Test architecture split: sub-repo test.sh = unit tests only (no network); parent test.sh = security scans + integration
+- Test architecture split: sub-repo test.sh = unit tests only (no network); test-integration.sh = security scans + integration
 - 13 MCP wrapper tests + integration tests (health, auth, isolation)
 - Isolation: tester-server has no access to /gitdir, /plans, or secrets
 
@@ -110,4 +110,4 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 | Subprocess timeout too short for complex tasks | Incomplete work | Medium | 600s timeout; plan smaller tasks |
 | Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; test runner gate in Phase 4 |
 | Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution |
-| Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in parent test.sh with network access |
+| Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in test-integration.sh with network access |
