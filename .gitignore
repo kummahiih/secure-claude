@@ -5,6 +5,8 @@
 cluster/certs/
 certs/
 cluster/workspace/
+cluster/workspace
+workspace
 
 # Python
 venv/

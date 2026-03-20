@@ -106,7 +106,8 @@ services:
       - SSL_CERT_FILE=/app/certs/ca.crt
     volumes:
       - ./workspace:/workspace
-      - /dev/null:/workspace/.git:ro  # Shadow .git file — structural hook prevention
+    tmpfs:
+      - /workspace/.git:ro,size=0  # Shadow .git — structural hook prevention
     networks:
       - int_net
     restart: unless-stopped
@@ -149,4 +150,3 @@ networks:
     driver: bridge
   int_net:
     internal: true
-
