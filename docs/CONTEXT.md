@@ -83,7 +83,7 @@ Host / Network
 | Host path | Container path | Mode | Purpose |
 | :--- | :--- | :--- | :--- |
 | ./workspace (→ active sub-repo) | /workspace | ro | Worktree for git operations |
-| ../.git/modules/cluster/\<sub-repo\> | /gitdir | rw | Git data for add/commit |
+| ./workspace/.git | /gitdir | rw | Git data for add/commit |
 | active sub-repo/docs | /docs | ro | Project documentation |
 
 ### Volume mounts on mcp-server:
@@ -91,7 +91,7 @@ Host / Network
 | Host path | Container path | Mode | Purpose |
 | :--- | :--- | :--- | :--- |
 | ./workspace (→ active sub-repo) | /workspace | rw | Go fileserver reads/writes code |
-| /dev/null | /workspace/.git | ro | Shadows .git — structural hook prevention |
+| tmpfs | /workspace/.git | ro,size=0 | Shadows .git via tmpfs — structural hook prevention |
 
 ### Volume mounts on plan-server:
 
@@ -117,7 +117,7 @@ Enforce boundaries structurally, never by filtering.
 3. MCP security proxy — mcp-watchdog intercepts all JSON-RPC, blocks 40+ attack classes
 4. Filesystem jail — os.OpenRoot at /workspace, traversal blocked at Go runtime level
 5. Repo isolation — active sub-repo as /workspace; parent repo not visible
-6. Git hook prevention — /dev/null shadow + separated gitdir + core.hooksPath=/dev/null
+6. Git hook prevention — tmpfs shadow + separated gitdir + core.hooksPath=/dev/null
 7. Git history protection — baseline commit floor at container startup
 8. Plan isolation — plan-server has no access to /workspace, /gitdir, or secrets
 9. Test isolation — tester-server has /workspace read-only, no access to /gitdir, /plans, or secrets
@@ -150,7 +150,7 @@ Enforce boundaries structurally, never by filtering.
 
 ### Test architecture split:
 - **Sub-repo test.sh** — unit tests only, no network required, runnable inside tester-server
-- **Parent test.sh** — security scans (need network for vuln DBs) + integration tests (need Docker)
+- **test-integration.sh** — security scans (need network for vuln DBs) + integration tests (need Docker)
 
 ---
 
@@ -170,7 +170,7 @@ Enforce boundaries structurally, never by filtering.
 | Planner repo | Separate submodule | Inside agent submodule | Independent development; swappable workspace for self-development |
 | Test execution | Direct subprocess in tester-server | Docker-in-Docker | No socket access needed, simpler, no privilege escalation |
 | Tester workspace access | Read-only mount | Read-write | Tests should never modify source |
-| Security scans location | Parent test.sh only | Sub-repo test.sh | Vuln DB fetches need network; sub-repo tests run in network-isolated tester |
+| Security scans location | test-integration.sh only | Sub-repo test.sh | Vuln DB fetches need network; sub-repo tests run in network-isolated tester |
 | Tester repo | Separate submodule (cluster/tester/) | Directory in parent | Consistent with agent/planner pattern; independently developable |
 | Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
 
