@@ -106,7 +106,13 @@ COPY --chown=appuser:appgroup agent/claude/*.py .
 COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
 COPY --chown=appuser:appgroup planner/planner/plan_mcp.py /app/plan_mcp.py
 
-# Prompt content — system prompts and slash commands
+
+# Lock down /app - readable but not writable by appuser
+RUN chmod -R 550 /app && \
+    chmod 440 /app/certs/ca.crt && \
+    chmod 400 /app/certs/agent.key && \
+    chown -R appuser:appgroup /app
+
 # System prompts — read by runenv.py at startup
 COPY --chmod=444 agent/prompts/system/ /app/prompts/
 
@@ -128,11 +134,6 @@ RUN chown -R root:root /home/appuser/.claude \
 RUN chown -R root:root /app/prompts \
  && chmod 555 /app/prompts
 
-# Lock down /app - readable but not writable by appuser
-RUN chmod -R 550 /app && \
-    chmod 440 /app/certs/ca.crt && \
-    chmod 400 /app/certs/agent.key && \
-    chown -R appuser:appgroup /app
 
 # Explicitly switch to the non-root user before running any code
 USER appuser
