@@ -54,7 +54,7 @@ echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] Scan Docker Compose Configuration (Trivy)..."
 (
   set +e
-  TRIVY_OUT=$(cd cluster && timeout 120 docker run --rm -v "$(pwd)":/app -w /app aquasec/trivy config . 2>&1)
+  TRIVY_OUT=$(cd cluster && timeout 120 docker run --rm -v "$(pwd)":/app -w /app aquasec/trivy:0.69.3 config . 2>&1)
   TRIVY_RC=$?
   if [ $TRIVY_RC -eq 124 ]; then
     echo "  ⚠️  Trivy timed out after 120s"
