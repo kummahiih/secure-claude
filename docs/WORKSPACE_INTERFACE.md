@@ -14,6 +14,36 @@ Any repository mounted as the active workspace in secure-claude must follow this
 └── ...                     # Project source code
 ```
 
+## Submodule Identity Contract
+
+If the workspace repository contains Git submodules, the root repository's author identity must be propagated to all initialized submodules prior to mounting the workspace. Because the parent repository's `/workspace/.git` is mounted read-only for security, the agent cannot dynamically configure its own Git identity if a submodule is missing it.
+
+To ensure the agent can successfully use the `git_commit` tool within subrepositories without falling into an execution loop, you must run the following initialization script (or integrate its logic into your startup sequence) before starting the `claude-server` container:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+echo "[setup] Propagating Git identity to submodules..."
+
+# 1. Grab the identity from the root repository
+ROOT_NAME=$(git config user.name)
+ROOT_EMAIL=$(git config user.email)
+
+# 2. Safety check: ensure the root identity actually exists
+if [ -z "$ROOT_NAME" ] || [ -z "$ROOT_EMAIL" ]; then
+    echo "Error: Root repository user.name or user.email is missing. Please configure them."
+    exit 1
+fi
+
+# 3. Apply the identity to all submodules
+git submodule foreach --quiet "
+    git config user.name \"\$ROOT_NAME\"
+    git config user.email \"\$ROOT_EMAIL\"
+    echo \"Configured identity for \$name\"
+"
+```
+
 ## Contract
 
 | Item | Requirement |
