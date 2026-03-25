@@ -65,9 +65,9 @@ running tests via the tester MCP tool, fixing failures, and committing — with
 human reviewing only the plan.
 
 ### Remaining work
-- [ ] Update system prompt to instruct agent to run tests after completing code changes
-- [ ] Add test-gate: agent should call run_tests + get_test_results before plan_complete
-- [ ] Handle test failure loop: agent retries fixes up to N times before plan_block
+- [X] Update system prompt to instruct agent to run tests after completing code changes
+- [X] Add test-gate: agent should call run_tests + get_test_results before plan_complete
+- [X] Handle test failure loop: agent retries fixes up to N times before plan_block
 
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
