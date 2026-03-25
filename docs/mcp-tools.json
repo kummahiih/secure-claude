@@ -112,12 +112,72 @@
       "command": "mcp-watchdog",
       "args": ["--verbose", "--", "python3", "/app/git_mcp.py"],
       "tools": [
-        {"name": "git_status", "description": "Show working tree status"},
-        {"name": "git_diff", "description": "Show changes in working tree or staged files"},
-        {"name": "git_add", "description": "Stage files for commit"},
-        {"name": "git_commit", "description": "Commit staged changes"},
-        {"name": "git_log", "description": "Show commit history"},
-        {"name": "git_reset_soft", "description": "Soft reset to a previous commit"}
+        {
+          "name": "git_status",
+          "description": "Show working tree status (short format). Returns list of changed files with status codes.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "submodule_path": {"type": "string", "description": "Optional submodule path relative to workspace root (e.g. 'cluster/agent'). If omitted, operates on the root repository."}
+            }
+          }
+        },
+        {
+          "name": "git_diff",
+          "description": "Show file differences. By default shows unstaged changes. Set staged=true to see changes staged for commit.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "staged": {"type": "boolean", "description": "If true, show staged (cached) changes instead of unstaged.", "default": false},
+              "submodule_path": {"type": "string", "description": "Optional submodule path relative to workspace root (e.g. 'cluster/agent'). If omitted, operates on the root repository."}
+            }
+          }
+        },
+        {
+          "name": "git_add",
+          "description": "Stage files for the next commit. Pass paths relative to workspace root. Use [\".\"] to stage all changes. Auto-detects the owning submodule from file paths; all paths must belong to the same repository.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths to stage, relative to workspace root. Use [\".\"] for all."}
+            },
+            "required": ["paths"]
+          }
+        },
+        {
+          "name": "git_commit",
+          "description": "Create a commit with staged changes. Requires a non-empty commit message.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "message": {"type": "string", "description": "Commit message."},
+              "submodule_path": {"type": "string", "description": "Optional submodule path relative to workspace root (e.g. 'cluster/agent'). If omitted, commits to the root repository."}
+            },
+            "required": ["message"]
+          }
+        },
+        {
+          "name": "git_log",
+          "description": "Show recent commits (oneline format). Returns up to max_count commits.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "max_count": {"type": "integer", "description": "Number of commits to show (default 10, max 50).", "default": 10},
+              "submodule_path": {"type": "string", "description": "Optional submodule path relative to workspace root (e.g. 'cluster/agent'). If omitted, shows log for the root repository."}
+            }
+          }
+        },
+        {
+          "name": "git_reset_soft",
+          "description": "Undo the last N commits, keeping all changes staged. Cannot reset past the baseline commit that existed at startup — only commits created during this session can be undone.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "count": {"type": "integer", "description": "Number of commits to undo (default 1, max 5).", "default": 1},
+              "submodule_path": {"type": "string", "description": "Optional submodule path relative to workspace root (e.g. 'cluster/agent'). If omitted, resets the root repository."}
+            }
+          }
+        }
       ]
     },
     "docs": {

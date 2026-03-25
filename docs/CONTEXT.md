@@ -54,7 +54,7 @@ Host / Network
 | Server | Tools | Transport | Access |
 | :--- | :--- | :--- | :--- |
 | fileserver | read_workspace_file, list_files, create_file, write_file, delete_file, grep_files, replace_in_file, append_file, create_directory | stdio → HTTPS REST | Read/write /workspace via Go fileserver |
-| git | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → git subprocess | Read/write /gitdir, read /workspace |
+| git | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → git subprocess | Read/write /gitdir, read /workspace; all tools accept optional `submodule_path` to target a submodule; `git_add` auto-detects submodule from file paths |
 | docs | list_docs, read_doc | stdio → local filesystem | Read-only /docs |
 | planner | plan_current, plan_list, plan_complete, plan_block, plan_create, plan_update_task | stdio → HTTPS REST | Read/write plan state via plan-server |
 | tester | run_tests, get_test_results | stdio → HTTPS REST | Run tests and retrieve results via tester-server |
@@ -175,6 +175,7 @@ Enforce boundaries structurally, never by filtering.
 | Security scans location | test-integration.sh only | Sub-repo test.sh | Vuln DB fetches need network; sub-repo tests run in network-isolated tester |
 | Tester repo | Separate submodule (cluster/tester/) | Directory in parent | Consistent with agent/planner pattern; independently developable |
 | Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
+| Submodule git routing | parse_gitmodules + git_env_for in git_mcp.py | Separate tool per submodule | Single tool surface; auto-detection from file paths; per-submodule baseline floors |
 
 Sub-repo specific implementation details:
 - Agent: [docs/CONTEXT.md](../cluster/agent/docs/CONTEXT.md)

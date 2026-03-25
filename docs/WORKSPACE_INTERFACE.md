@@ -14,7 +14,24 @@ Any repository mounted as the active workspace in secure-claude must follow this
 └── ...                     # Project source code
 ```
 
-## Submodule Identity Contract
+## Submodule Support
+
+### How the git MCP tools handle submodules
+
+All git tools (`git_status`, `git_diff`, `git_commit`, `git_log`, `git_reset_soft`) accept an optional `submodule_path` parameter — a path relative to the workspace root (e.g. `cluster/agent`). When provided, the tool operates on that submodule's git repo instead of the root.
+
+`git_add` does not take `submodule_path` directly. Instead it auto-detects the owning submodule from the file paths you pass. All paths must belong to the same repository; staging across multiple repos in one call returns an error.
+
+Routing is implemented via two helpers in `git_mcp.py`:
+
+- **`parse_gitmodules(workspace)`** — reads `/workspace/.gitmodules` and returns a list of `{name, path}` dicts.
+- **`git_env_for(file_path, submodule_path)`** — returns the correct `GIT_DIR` / `GIT_WORK_TREE` env for the target repo. Priority: explicit `submodule_path` > auto-detect from `file_path` > root repo.
+
+For submodules, `GIT_DIR` is resolved to `/gitdir/modules/<submodule_path>` (the standard location Git uses when `git submodule update` is called against a separated gitdir).
+
+Per-submodule baseline commits are captured at startup so `git_reset_soft` enforces the same session-only floor for submodule repos that it does for the root.
+
+### Identity contract
 
 If the workspace repository contains Git submodules, the root repository's author identity must be propagated to all initialized submodules prior to mounting the workspace. Because the parent repository's `/workspace/.git` is mounted read-only for security, the agent cannot dynamically configure its own Git identity if a submodule is missing it.
 
