@@ -1,0 +1,41 @@
+{
+  "id": "plan-20260325-124634",
+  "goal": "Make git MCP tools submodule-aware so the agent can stage, diff, commit, log, and reset across subrepositories already initialised under /workspace \u2014 without modifying hooks, remotes, docker-compose, or run.sh.",
+  "status": "completed",
+  "created": "2026-03-25T12:46:34.303671+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add submodule-detection helpers to git_mcp.py",
+      "files": [
+        "cluster/agent/claude/git_mcp.py"
+      ],
+      "action": "Add two helper functions near the top of git_mcp.py, after the existing constants:\n\n1. `parse_gitmodules(workspace='/workspace') -> list[dict]`\n   - Opens `/workspace/.gitmodules` (returns [] if absent)\n   - Parses every `[submodule \"<name>\"]` block and extracts the `path =` value\n   - Returns a list of dicts: `[{\"name\": \"<name>\", \"path\": \"<relative-path>\"}]`\n   - Normalises all paths with `os.path.normpath`\n\n2. `git_env_for(file_path: str | None = None, submodule_path: str | None = None) -> tuple[dict, str, str]`\n   - Returns `(env_vars, git_dir, work_tree)` where:\n     - `env_vars` is a copy of `os.environ` with `GIT_DIR` and `GIT_WORK_TREE` set\n     - `git_dir` is the absolute path to the correct `.git` dir\n     - `work_tree` is the absolute path to the correct working tree root\n   - If `submodule_path` is given, set:\n     - `git_dir  = /gitdir/modules/<submodule_path>`\n     - `work_tree = /workspace/<submodule_path>`\n   - Else if `file_path` is given, call `parse_gitmodules()` and pick the submodule whose `path` is a prefix of `file_path`; if found, treat like `submodule_path` above\n   - Else (no match / no argument): use `git_dir=/gitdir`, `work_tree=/workspace`\n\n3. Extend the existing baseline-commit initialisation (the dict/set populated at module startup) to also record the HEAD commit for every submodule returned by `parse_gitmodules()`, keyed by `submodule_path`. Use `git_env_for(submodule_path=sub['path'])` when calling `git rev-parse HEAD` for each submodule; skip silently if the submodule has no commits yet.",
+      "verify": "run_tests passes; unit tests for parse_gitmodules (empty workspace, one submodule, nested submodule) and git_env_for (no args \u2192 root, file inside submodule, explicit submodule_path) all pass.",
+      "done": "parse_gitmodules and git_env_for exist in git_mcp.py; baseline dict is populated for each submodule at startup; run_tests passes.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Update all six git tool handlers to accept optional submodule_path",
+      "files": [
+        "cluster/agent/claude/git_mcp.py"
+      ],
+      "action": "Update each tool handler to be submodule-aware. In all cases, the default behaviour (no submodule_path argument) must remain identical to current behaviour so the root-repo workflow is not broken.\n\n**git_status** \u2014 add optional `submodule_path: str = None`; pass to `git_env_for(submodule_path=submodule_path)` and run `git --git-dir=<git_dir> --work-tree=<work_tree> status`.\n\n**git_diff** \u2014 add optional `submodule_path: str = None`; same pattern.\n\n**git_log** \u2014 add optional `submodule_path: str = None`; same pattern.\n\n**git_add** \u2014 keep existing `files` parameter; after collecting the list of paths, call `git_env_for(file_path=files[0])` to auto-detect submodule from the first path. If all paths share the same submodule prefix, run `git add` once with the correct git env. If paths span more than one submodule (or mix root + submodule), return an error string: `'Error: git_add paths span multiple repositories; stage each submodule separately.'` No change to the hook-prevention logic already in place.\n\n**git_commit** \u2014 add optional `submodule_path: str = None`; pass to `git_env_for(submodule_path=submodule_path)`. The baseline-commit floor check must look up the correct baseline for the resolved submodule (or root).\n\n**git_reset_soft** \u2014 add optional `submodule_path: str = None`; pass to `git_env_for(submodule_path=submodule_path)`. The baseline floor must use the per-submodule baseline recorded at startup.",
+      "verify": "run_tests passes; existing root-repo tests still pass; new submodule-path tests (added in next task) are unblocked by this change.",
+      "done": "All six tool handlers accept submodule_path (where applicable) and route git subprocess calls through git_env_for; run_tests passes.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Add and update tests for submodule-aware git operations",
+      "files": [
+        "cluster/agent/tests/test_git_mcp.py"
+      ],
+      "action": "Add test cases to the existing test file (do NOT delete existing tests). Cover:\n\n1. `parse_gitmodules` \u2014 three parameterised cases:\n   a. No `.gitmodules` file \u2192 returns `[]`\n   b. One submodule entry \u2192 returns correct `{name, path}` dict\n   c. Nested path (`a/b`) \u2192 path is preserved verbatim after normpath\n\n2. `git_env_for` \u2014 four cases:\n   a. No args \u2192 `GIT_DIR=/gitdir`, `GIT_WORK_TREE=/workspace`\n   b. `file_path` outside any submodule \u2192 root env\n   c. `file_path` inside submodule `sub/foo/bar.py` \u2192 `GIT_DIR=/gitdir/modules/sub`, `GIT_WORK_TREE=/workspace/sub`\n   d. Explicit `submodule_path='sub'` \u2192 same as (c)\n\n3. `git_add` multi-repo guard \u2014 mock two submodules; pass one file from each; assert the error string is returned and no subprocess is called.\n\n4. `git_status` / `git_diff` / `git_log` with `submodule_path` \u2014 mock subprocess; assert `GIT_DIR` in the env passed to the subprocess equals `/gitdir/modules/<submodule_path>`.\n\n5. `git_commit` / `git_reset_soft` baseline floor per submodule \u2014 mock the baseline dict with a known commit; assert that attempting to reset to a commit older than the submodule baseline is rejected.\n\nAll mocks should use `unittest.mock.patch` on `subprocess.run` / `subprocess.check_output` as the existing tests do. Do not add network calls.",
+      "verify": "run_tests passes; `python -m pytest -v --tb=short cluster/agent/tests/test_git_mcp.py` exits 0 with all new cases shown as PASSED.",
+      "done": "All new test cases exist in test_git_mcp.py and run_tests passes with no regressions.",
+      "status": "completed"
+    }
+  ]
+}
