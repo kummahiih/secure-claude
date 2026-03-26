@@ -23,7 +23,7 @@ Repos:
 Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
      └─> claude-server:8000 (FastAPI + Claude Code subprocess)
-          ├─> proxy:4000 (LiteLLM) ──> Anthropic API
+          ├─> proxy:4000 (LiteLLM) ──> caddy-sidecar:8081 ──> Anthropic API
           ├─> MCP stdio servers (inside claude-server):
           │    ├─> files_mcp.py  → HTTPS REST → mcp-server:8443
           │    ├─> git_mcp.py    → git subprocess (GIT_DIR=/gitdir)
