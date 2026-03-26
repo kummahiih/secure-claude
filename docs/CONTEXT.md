@@ -44,7 +44,7 @@ Host / Network
 | :--- | :--- | :--- |
 | caddy-sidecar | TLS termination, external ingress, reverse proxy | caddy_entrypoint.sh |
 | claude-server | FastAPI + Claude Code CLI subprocess + 5 MCP stdio servers | verify_isolation.py (26 checks) |
-| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY; int_net only, egress via caddy-sidecar:8081 (no direct internet) | proxy_wrapper.py (4 checks) |
+| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY; int_net only, **no direct external network access** (security decision) — all egress routes through caddy-sidecar:8081 | proxy_wrapper.py (4 checks) |
 | mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
 | plan-server | Python REST server, plan state in /plans | plan_server.py (10 checks) |
 | tester-server | Go REST server, runs /workspace/test.sh as subprocess | entrypoint.sh (env scan + /workspace check) |
@@ -176,6 +176,7 @@ Enforce boundaries structurally, never by filtering.
 | Tester repo | Separate submodule (cluster/tester/) | Directory in parent | Consistent with agent/planner pattern; independently developable |
 | Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
 | Submodule git routing | parse_gitmodules + git_env_for in git_mcp.py | Separate tool per submodule | Single tool surface; auto-detection from file paths; per-submodule baseline floors |
+| Proxy external network access | Removed (int_net only, egress via caddy-sidecar) | Direct internet from proxy container | Security decision: prevents proxy from exfiltrating ANTHROPIC_API_KEY or reaching external hosts directly; all outbound traffic is funnelled through caddy-sidecar for visibility and control |
 
 Container hardening decisions and kernel constraints: [docs/HARDENING.md](docs/HARDENING.md)
 
