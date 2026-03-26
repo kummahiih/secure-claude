@@ -75,16 +75,51 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md)
 
 ## Phase 5: Hardening and Polish
 
-- [ ] Resource limits on tester-server (timeout, memory caps for test runs)
-- [ ] Output sanitization from test runner (strip any leaked env vars)
+Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
+
+### P1 — Critical
+
+- [ ] **RR-1** Remove `tls_insecure_skip_verify` from `caddy/Caddyfile`; provision
+  host nginx with a cert signed by the cluster CA (or a trusted public CA) and
+  add `tls_trusted_ca_certs` pointing to the appropriate bundle.
+- [ ] **RR-2** Add `context.WithTimeout` (or `cmd.WaitDelay`) around
+  `cmd.CombinedOutput()` in `tester/main.go` to prevent indefinite hangs.
+
+### P2 — High
+
+- [ ] **RR-3** Add `mem_limit`, `cpus`, and `pids_limit` to all containers in
+  `docker-compose.yml`; add `ulimit` to the test subprocess in `tester/main.go`.
+- [ ] **RR-4** Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from
+  `MCP_API_TOKEN` to limit blast radius of a single token compromise.
+- [ ] **RR-5** Remove or reduce the `FILE_SUCCESS` full-content log line in
+  `fileserver/main.go` (replace with length/hash summary).
+- [ ] **RR-11** Redact known secret patterns from `server.py` log output; move
+  full Claude Code stdout/stderr to `DEBUG` level.
+
+### P3 — Medium
+
+- [ ] **RR-6** URL-encode path parameters in `files_mcp.py` using the `params=`
+  kwarg to `requests.get/post` instead of string interpolation.
+- [ ] **RR-7** Strip directory components from slash-command names in `server.py`:
+  add `name = os.path.basename(name)` (or reject names containing `/` or `..`).
+- [ ] **RR-8** Add rate limiting or concurrency cap on `/ask` and `/plan`
+  endpoints (Caddy rate-limit directive or FastAPI semaphore).
+- [ ] **RR-9** Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`,
+  `plan-server`, and `tester-server` in `docker-compose.yml`.
+
+### P4 — Low / Polish
+
+- [ ] **RR-10** Add cert expiry monitoring; document rotation procedure; consider
+  90-day leaf cert lifetimes with automated renewal.
+- [ ] **RR-12** Upgrade Go servers (`mcp-server/main.go`, `tester/main.go`) from
+  `tls.VersionTLS12` to `tls.VersionTLS13`.
+- [ ] **RR-13** Document test output as an explicit trust boundary; consider
+  capping `output` length returned by `tester-server`.
+- [ ] **RR-14** Add maximum field-length validation to plan creation in
+  `plan_server.py`; consider a human-review gate before a plan becomes `current`.
+- [ ] **RR-15** Validate `request.model` against an allowlist in `server.py`
+  before passing it to the `--model` subprocess flag.
 - [ ] Tag a release
-- [ ] Egress TLS: Caddyfile currently uses `tls_insecure_skip_verify` for the
-  egress proxy to `host.docker.internal:443`. This is intentional — the host
-  nginx uses its own self-signed CA that is unrelated to the cluster's internal
-  CA (which is ephemeral and regenerated on each `run.sh`). Before a production
-  deployment: provision the host proxy with a cert from the cluster CA (or a
-  trusted public CA), remove `tls_insecure_skip_verify`, and add
-  `tls_trusted_ca_certs` pointing to the appropriate bundle.
 
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 [planner PLAN.md](../cluster/planner/docs/PLAN.md),
