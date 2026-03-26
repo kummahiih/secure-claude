@@ -10,7 +10,7 @@ The agent supports a plan-then-execute workflow: create a structured plan with `
 Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
      └─> claude-server:8000 (FastAPI + Claude Code)
-          ├─> proxy:4000 (LiteLLM) ──> Anthropic API
+          ├─> proxy:4000 (LiteLLM) ──> Anthropic API (no direct external access; int_net only)
           ├─> MCP stdio servers (inside claude-server)
           ├─> mcp-server:8443 (Go REST, filesystem jail)
           │    └─> /workspace (bind mount → active sub-repo)
@@ -65,7 +65,7 @@ secure-claude/                          # This repo — orchestration, infrastru
 Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos document their own implementation details. The cluster-level guarantees are:
 
 1. **Credential Isolation** — agent uses ephemeral DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
-2. **Network Isolation** — claude-server on int_net only, no direct internet access
+2. **Network Isolation** — claude-server and proxy on int_net only; the proxy has no direct external network access (intentional security boundary — outbound Anthropic API calls are routed through the host network stack, never directly from the proxy container)
 3. **Filesystem Jail** — Go os.OpenRoot at /workspace, traversal blocked at runtime level
 4. **Repo Isolation** — active sub-repo as /workspace; parent repo never visible
 5. **Dual-Layer Auth** — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
