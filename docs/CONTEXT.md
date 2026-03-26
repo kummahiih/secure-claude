@@ -44,7 +44,7 @@ Host / Network
 | :--- | :--- | :--- |
 | caddy-sidecar | TLS termination, external ingress, reverse proxy | caddy_entrypoint.sh |
 | claude-server | FastAPI + Claude Code CLI subprocess + 5 MCP stdio servers | verify_isolation.py (26 checks) |
-| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY | proxy_wrapper.py (4 checks) |
+| proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY; int_net only, egress via caddy-sidecar:8081 (no direct internet) | proxy_wrapper.py (4 checks) |
 | mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
 | plan-server | Python REST server, plan state in /plans | plan_server.py (10 checks) |
 | tester-server | Go REST server, runs /workspace/test.sh as subprocess | entrypoint.sh (env scan + /workspace check) |
