@@ -192,7 +192,8 @@ server children — locking the `git_reset_soft` floor for the lifetime of the c
 ### 2.3 proxy (litellm-proxy)
 
 **Role:** LiteLLM gateway holding the real `ANTHROPIC_API_KEY`; validates `DYNAMIC_AGENT_KEY`
-as its master key; translates requests to the Anthropic API.
+as its master key; translates requests to the Anthropic API via `caddy-sidecar:8081`
+(int_net only — no direct internet access).
 
 **Base image and build** (`Dockerfile.proxy`):
 - Stage 1 (`alpine:3.23.3 AS signer`): Generates 3072-bit RSA cert for `proxy`.
@@ -388,8 +389,7 @@ TEST_SCRIPT      — defaults to /workspace/test.sh (override for testing)
 │                                                                         │
 │  ┌── ext_net (bridge, internet-routable) ───────────────────────────┐  │
 │  │                                                                   │  │
-│  │  caddy-sidecar (:8443 → host)                                    │  │
-│  │  litellm-proxy  (DNS: 8.8.8.8, 1.1.1.1)                         │  │
+│  │  caddy-sidecar (:8443 → host, :8081 egress proxy)               │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -408,11 +408,13 @@ on this bridge. No container on `int_net` alone can reach the internet.
 `claude-server`, `mcp-server`, `plan-server`, and `tester-server` are on **int_net only**.
 They have zero internet access — enforced by the network driver, not firewall rules.
 
-`caddy-sidecar` and `litellm-proxy` are on **both networks**:
-- `caddy-sidecar` bridges external HTTPS ingress → internal claude-server, and also
-  proxies LLM egress (port 8080 → `host.docker.internal:443`)
-- `litellm-proxy` needs internet (DNS configured explicitly: 8.8.8.8/1.1.1.1) to reach
-  `api.anthropic.com`
+`caddy-sidecar` is on **both networks**: it bridges external HTTPS ingress → internal
+claude-server, and also proxies LLM egress from `litellm-proxy` to `api.anthropic.com`
+(port 8081 → `api.anthropic.com:443`).
+
+`litellm-proxy` is on **int_net only** — no direct internet access. All outbound Anthropic
+API calls route through `caddy-sidecar:8081` which hardcodes the upstream as
+`api.anthropic.com:443`.
 
 ### Reachability Matrix
 
@@ -421,7 +423,7 @@ They have zero internet access — enforced by the network driver, not firewall 
 | **External**     | ✓ 8443| ✗             | ✗     | ✗          | ✗           | ✗             | —        |
 | **caddy**        | —     | ✓ 8000        | ✗     | ✗          | ✗           | ✗             | ✓ (egress proxy) |
 | **claude-server**| ✗     | —             | ✓ 4000| ✓ 8443     | ✓ 8443      | ✓ 8443        | ✗        |
-| **proxy**        | ✗     | ✗             | —     | ✗          | ✗           | ✗             | ✓        |
+| **proxy**        | ✓ 8081| ✗             | —     | ✗          | ✗           | ✗             | ✗        |
 | **mcp-server**   | ✗     | ✗             | ✗     | —          | ✗           | ✗             | ✗        |
 | **plan-server**  | ✗     | ✗             | ✗     | ✗          | —           | ✗             | ✗        |
 | **tester-server**| ✗     | ✗             | ✗     | ✗          | ✗           | —             | ✗        |
@@ -438,8 +440,8 @@ Every service-to-service connection uses TLS with the cluster's internal CA:
 | claude-server → mcp-server:8443  | HTTPS/TLS  | Bearer MCP_API_TOKEN      | TLS (cluster CA)   |
 | claude-server → plan-server:8443 | HTTPS/TLS  | Bearer MCP_API_TOKEN      | TLS (cluster CA)   |
 | claude-server → tester-server:8443| HTTPS/TLS | Bearer MCP_API_TOKEN      | TLS (cluster CA)   |
-| proxy → api.anthropic.com        | HTTPS/TLS  | Bearer ANTHROPIC_API_KEY  | TLS (public CA)    |
-| caddy egress → host:443          | HTTPS/TLS  | (none — `tls_insecure_skip_verify`) | TLS (⚠ unvalidated) |
+| proxy → caddy-sidecar:8081       | HTTPS/TLS  | Bearer ANTHROPIC_API_KEY  | TLS (cluster CA)   |
+| caddy-sidecar → api.anthropic.com| HTTPS/TLS  | (forwarded from proxy)    | TLS (public CA)    |
 
 ### Full Packet Path: External Query
 
@@ -459,7 +461,10 @@ Claude Code CLI (subprocess)
   │  Bearer DYNAMIC_AGENT_KEY
   ▼
 litellm-proxy:4000   [TLS, validates DYNAMIC_AGENT_KEY as master_key]
-  │  Bearer ANTHROPIC_API_KEY
+  │  Bearer ANTHROPIC_API_KEY  [TLS: cluster CA]
+  ▼
+caddy-sidecar:8081   [egress proxy, int_net only]
+  │  Bearer ANTHROPIC_API_KEY  [TLS: public CA]
   ▼
 api.anthropic.com   [Public TLS]
 ```
@@ -515,8 +520,12 @@ api.anthropic.com   [Public TLS]
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ litellm-proxy:4000                                                      │
 │   - Validates DYNAMIC_AGENT_KEY as LITELLM_MASTER_KEY                  │
-│   - Routes to Anthropic API with real ANTHROPIC_API_KEY                │
+│   - Routes to caddy-sidecar:8081 with real ANTHROPIC_API_KEY           │
+│     (int_net only — no direct internet access)                         │
 └──────────────────────────────┬──────────────────────────────────────────┘
+                               │ Bearer ANTHROPIC_API_KEY [TLS: cluster CA]
+                               ▼
+                     caddy-sidecar:8081  [egress proxy]
                                │ Bearer ANTHROPIC_API_KEY [TLS: public CA]
                                ▼
                      api.anthropic.com
