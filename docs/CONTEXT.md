@@ -78,7 +78,7 @@ Host / Network
 6. Claude Code → mcp-watchdog → git_mcp.py → git subprocess
 7. Claude Code → mcp-watchdog → plan_mcp.py → plan_complete → plan-server:8443
 8. Claude Code → mcp-watchdog → tester_mcp.py → HTTPS REST → tester-server:8443
-9. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → Anthropic API
+9. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → caddy-sidecar:8081 → Anthropic API
 
 ### Volume mounts on claude-server:
 
