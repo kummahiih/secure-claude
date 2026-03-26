@@ -39,6 +39,9 @@ COPY --chown=caddyuser:caddygroup caddy/caddy_entrypoint.sh /usr/local/bin/caddy
 RUN chmod +x /usr/local/bin/caddy_entrypoint.sh
 # 4. Switch to the non-root user
 
+# Strip file capabilities so cap_drop: ALL works
+RUN apk add --no-cache libcap && setcap -r /usr/bin/caddy && apk del libcap
+
 USER caddyuser
 ENTRYPOINT ["/usr/local/bin/caddy_entrypoint.sh"]
 

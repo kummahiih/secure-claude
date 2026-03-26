@@ -24,6 +24,7 @@ services:
     cap_drop:
       - ALL
     read_only: true
+    pids_limit: 100
     tmpfs:
       - /tmp:noexec,nosuid,size=64m
 
