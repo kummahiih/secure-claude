@@ -177,7 +177,10 @@ Enforce boundaries structurally, never by filtering.
 | Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
 | Submodule git routing | parse_gitmodules + git_env_for in git_mcp.py | Separate tool per submodule | Single tool surface; auto-detection from file paths; per-submodule baseline floors |
 
+Container hardening decisions and kernel constraints: [docs/HARDENING.md](docs/HARDENING.md)
+
 Sub-repo specific implementation details:
 - Agent: [docs/CONTEXT.md](../cluster/agent/docs/CONTEXT.md)
 - Planner: [docs/CONTEXT.md](../cluster/planner/docs/CONTEXT.md)
 - Tester: [docs/CONTEXT.md](../cluster/tester/docs/CONTEXT.md)
+
