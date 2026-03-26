@@ -1,0 +1,52 @@
+{
+  "id": "plan-20260326-190730",
+  "goal": "Update documentation to reflect that the LiteLLM proxy (proxy container) no longer has direct external network access \u2014 egress is now exclusively via caddy-sidecar:8081 \u2192 api.anthropic.com.",
+  "status": "completed",
+  "created": "2026-03-26T19:07:30.956775+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Update CONTEXT.md architecture ASCII diagram",
+      "files": [
+        "docs/CONTEXT.md"
+      ],
+      "action": "In the ASCII architecture diagram, change the proxy line from `\u251c\u2500> proxy:4000 (LiteLLM) \u2500\u2500> Anthropic API` to `\u251c\u2500> proxy:4000 (LiteLLM) \u2500\u2500> caddy-sidecar:8081 \u2500\u2500> Anthropic API` to reflect that the proxy no longer connects directly to the internet.",
+      "verify": "Read docs/CONTEXT.md and confirm the diagram shows proxy routing through caddy-sidecar, not directly to Anthropic API.",
+      "done": "The ASCII diagram in CONTEXT.md shows proxy \u2192 caddy-sidecar:8081 \u2192 Anthropic API.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Update CONTEXT.md container table for proxy row",
+      "files": [
+        "docs/CONTEXT.md"
+      ],
+      "action": "In the 'Six containers' table, update the proxy row description from just 'LiteLLM gateway, holds real ANTHROPIC_API_KEY' to note that it is on int_net only and egresses exclusively via caddy-sidecar:8081 (no direct internet access).",
+      "verify": "Read docs/CONTEXT.md and confirm the proxy row in the container table reflects int_net-only placement and caddy-mediated egress.",
+      "done": "Proxy row in the CONTEXT.md container table mentions int_net only and caddy-sidecar egress.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Update CONTEXT.md request flow step 9",
+      "files": [
+        "docs/CONTEXT.md"
+      ],
+      "action": "In the 'Request flow (/ask)' section, update step 9 from `Claude Code \u2192 ANTHROPIC_BASE_URL=https://proxy:4000 \u2192 LiteLLM \u2192 Anthropic API` to `Claude Code \u2192 ANTHROPIC_BASE_URL=https://proxy:4000 \u2192 LiteLLM \u2192 caddy-sidecar:8081 \u2192 Anthropic API` to show the full egress chain.",
+      "verify": "Read docs/CONTEXT.md and confirm step 9 of the request flow shows the caddy-sidecar hop.",
+      "done": "Request flow step 9 in CONTEXT.md shows proxy \u2192 caddy-sidecar \u2192 Anthropic API.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update ARCHITECTURE.md network topology and service inventory for proxy",
+      "files": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "action": "Find all references in ARCHITECTURE.md where the proxy is described as having direct internet or ext_net access, or connecting directly to api.anthropic.com. Update them to reflect: proxy is int_net only; outbound Anthropic API calls flow through caddy-sidecar:8081. Update any network topology diagrams or tables accordingly.",
+      "verify": "Read docs/ARCHITECTURE.md and confirm no sections still describe the proxy with direct internet access or ext_net membership.",
+      "done": "ARCHITECTURE.md consistently describes the proxy as int_net-only with egress via caddy-sidecar.",
+      "status": "completed"
+    }
+  ]
+}
