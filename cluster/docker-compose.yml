@@ -40,9 +40,6 @@ services:
     pids_limit: 150
     tmpfs:
       - /tmp:noexec,nosuid,size=256m
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     environment:
       # secrets from the env
       - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}
@@ -60,15 +57,13 @@ services:
       - HTTP_PROXY=""
       - HTTPS_PROXY=""
 
-
     volumes:
       - ./proxy/proxy_config.yaml:/tmp/config.yaml:ro
       - ./proxy/proxy_wrapper.py:/app/proxy_wrapper.py:ro
     # Run the mock wrapper instead of the standard LiteLLM start command
     entrypoint: ["python3", "/app/proxy_wrapper.py"]
     networks:
-      - int_net  # For talking to claude-server (Internal)
-      - ext_net  # For talking to OpenAI/Anthropic (Outside World)
+      - int_net  # Internal only — egress routed through caddy-sidecar:8081
     restart: unless-stopped
 
   claude-server:

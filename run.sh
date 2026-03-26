@@ -60,9 +60,15 @@ mkdir -p cluster/certs cluster/workspace
 if [ ! -f cluster/certs/ca.crt ]; then
     echo "[$(date +'%H:%M:%S')] Generating Root CA..."
     openssl genrsa -out cluster/certs/ca.key 4096
+
+    # CA must declare basicConstraints and keyUsage extensions.
+    # OpenSSL 3.x (Python/aiohttp) rejects CA certs without keyUsage: keyCertSign.
     openssl req -x509 -new -nodes -key cluster/certs/ca.key -sha256 -days 3650 \
         -out cluster/certs/ca.crt \
-        -subj "/C=FI/ST=Uusimaa/L=Espoo/O=LocalCluster/CN=ClusterRootCA" >/dev/null 2>&1
+        -subj "/C=FI/ST=Uusimaa/L=Espoo/O=LocalCluster/CN=ClusterRootCA" \
+        -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" \
+        -addext "subjectKeyIdentifier=hash"
 fi
 
 

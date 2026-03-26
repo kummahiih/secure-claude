@@ -4,17 +4,20 @@ model_list:
     litellm_params:
       model: anthropic/claude-sonnet-4-6
       api_key: "os.environ/ANTHROPIC_API_KEY"
+      api_base: https://caddy-sidecar:8081
 
   - model_name: claude-opus-4-6
     litellm_params:
       model: anthropic/claude-opus-4-6
       api_key: "os.environ/ANTHROPIC_API_KEY"
+      api_base: https://caddy-sidecar:8081
 
   # Alias so mcp_watchdog's hardcoded model name resolves
   - model_name: claude-haiku-4-5-20251001
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: "os.environ/ANTHROPIC_API_KEY"
+      api_base: https://caddy-sidecar:8081
 
 general_settings:
   master_key: "os.environ/DYNAMIC_AGENT_KEY"

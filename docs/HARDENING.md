@@ -113,21 +113,127 @@ LiteLLM PyPI versions 1.82.7 and 1.82.8 were backdoored with a credential-steali
 | Stage 0: Payload execution (`.pth` or `proxy_server.py` injection) | **No** | Runs inside the Python process before any wrapper code |
 | Stage 1: Read `ANTHROPIC_API_KEY` from process env | **No** | Environment variables are readable by the running process |
 | Stage 1: Harvest SSH keys, wallets, `.env` files from filesystem | **Yes** | `read_only: true`, non-root, no such files exist in container |
-| Stage 1: Exfiltrate data to `models.litellm.cloud` | **No** | Container has `ext_net` + DNS for reaching Anthropic API; outbound HTTPS to arbitrary domains is not restricted |
+| Stage 1: Exfiltrate data to `models.litellm.cloud` | **Yes** | Proxy on `int_net` only; Caddy egress proxy only forwards to `api.anthropic.com` (see Egress Filtering section) |
 | Stage 2: Kubernetes lateral movement | **Yes** | No Kubernetes, no socket access, `cap_drop: ALL` |
 | Stage 3: Write persistence to `~/.config/sysmon/` | **Yes** | `read_only: true` blocks writes outside tmpfs |
 | Stage 3: Write `/tmp/pglog`, `/tmp/.pg_state` | **Partial** | tmpfs is writable, but `noexec` blocks binary execution from `/tmp` |
 | Stage 3: Install systemd backdoor | **Yes** | `read_only: true`, no systemd in container |
 
-**Key gap: egress filtering.** The proxy container can reach any internet host via `ext_net`. A compromised process could exfiltrate `ANTHROPIC_API_KEY` to an attacker domain. Restricting egress to only `api.anthropic.com` (via Caddy egress proxy or network policy) would close this gap. See "Planned: egress filtering" below.
+**Key gap closed: egress filtering.** The proxy container now routes all outbound traffic through `caddy-sidecar:8081`, which only forwards to `api.anthropic.com`. See the Egress Filtering section below for details.
 
 ### Not applied / deferred
 
 | Directive | Reason |
 |:---|:---|
 | `no-new-privileges:true` | Kernel 6.17.0-19 does not support it (see Host Environment Constraints) |
-| Egress filtering | Planned — route outbound through Caddy to restrict to `api.anthropic.com` only |
 | `mem_limit` | LiteLLM is heavier than Caddy; needs profiling before setting a safe limit |
+
+---
+
+## Internal CA Certificate
+
+### Required extensions for OpenSSL 3.x compatibility
+
+The internal CA certificate (`cluster/certs/ca.crt`) must include `basicConstraints` and `keyUsage` extensions. OpenSSL 3.x (used by Python's `ssl` module in the LiteLLM and plan-server images) rejects CA certificates that lack the `keyUsage: keyCertSign` extension with:
+
+```
+SSLCertVerificationError: CA cert does not include key usage extension
+```
+
+The CA is generated in `run.sh` with:
+
+```bash
+openssl req -x509 ... \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "subjectKeyIdentifier=hash"
+```
+
+`pathlen:0` restricts this CA to signing end-entity certificates only — it cannot sign intermediate CAs.
+
+**If the CA cert is regenerated**, all container images must be rebuilt (every Dockerfile has a signer stage that uses `ca.key` + `ca.crt` to sign leaf certs, and every image bakes in `ca.crt` for trust).
+
+### LiteLLM startup warning (expected)
+
+With the proxy container on `int_net` only, LiteLLM logs this on every startup:
+
+```
+WARNING: Failed to fetch remote model cost map from https://raw.githubusercontent.com/.../model_prices_and_context_window.json: [Errno -2] Name or service not known. Falling back to local backup.
+```
+
+This is expected and harmless — LiteLLM tries to fetch updated pricing data from GitHub, fails because external DNS is unreachable, and falls back to its bundled copy. The warning confirms egress restriction is working.
+
+---
+
+## Egress Filtering (proxy → Caddy → api.anthropic.com)
+
+### Problem
+
+The proxy container holds `ANTHROPIC_API_KEY` and previously had direct internet access via `ext_net`. A compromised LiteLLM process (e.g. supply-chain attack like the TeamPCP incident) could exfiltrate the key to any arbitrary domain over HTTPS.
+
+### Solution
+
+Route all proxy outbound traffic through a dedicated Caddy reverse proxy endpoint that only forwards to `api.anthropic.com`.
+
+**Architecture:**
+
+```
+proxy (int_net only)
+  └─ HTTPS ─→ caddy-sidecar:8081 (int_net + ext_net)
+                  └─ reverse_proxy ─→ api.anthropic.com:443
+```
+
+### Changes applied
+
+| Component | Change | Detail |
+|:---|:---|:---|
+| Caddyfile | New `:8081` listener | Reverse-proxies exclusively to `api.anthropic.com:443`; TLS with internal CA certs; sets `Host: api.anthropic.com` and `tls_server_name` |
+| Caddyfile | Removed `:8080` egress block | The general-purpose egress proxy through `host.docker.internal` is no longer needed |
+| docker-compose.yml | proxy: removed `ext_net` | Proxy is now `int_net` only — no direct internet access |
+| docker-compose.yml | proxy: removed `dns` | No external DNS needed; proxy resolves `caddy-sidecar` via Docker's internal DNS on `int_net` |
+| proxy_config.yaml | `api_base: https://caddy-sidecar:8081` | LiteLLM sends Anthropic API calls to Caddy instead of directly to `api.anthropic.com` |
+
+### How LiteLLM reaches the Anthropic API
+
+LiteLLM's `proxy_config.yaml` must set `api_base` for the Anthropic provider to `https://caddy-sidecar:8081`. The proxy container already trusts the internal CA (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`), so TLS to Caddy works. Caddy then forwards to `api.anthropic.com:443` using public TLS — no internal CA involved on the outbound leg.
+
+The `Host` header and TLS SNI are set to `api.anthropic.com` so the Anthropic API sees a normal request. The `Authorization` header (containing `ANTHROPIC_API_KEY`) passes through Caddy untouched — Caddy never logs or inspects it, and `ANTHROPIC_API_KEY` is not in Caddy's environment (enforced by `caddy_entrypoint.sh`).
+
+### What this blocks
+
+A compromised process inside the proxy container can only make outbound HTTPS connections to `caddy-sidecar:8081`. Caddy hardcodes the upstream as `api.anthropic.com:443` — there is no way for the client to influence the destination. Attempts to exfiltrate data to `models.litellm.cloud` or any other attacker domain fail because:
+
+1. The proxy container has no route to the internet (`int_net` is `internal: true`)
+2. The only reachable egress path (`caddy-sidecar:8081`) only forwards to `api.anthropic.com`
+3. DNS resolution for external domains fails inside `int_net` (no external DNS configured on proxy)
+
+### Supply chain attack impact (revised)
+
+With egress filtering applied, the TeamPCP attack analysis from above changes:
+
+| Attack stage | Blocked? | Why |
+|:---|:---|:---|
+| Stage 1: Exfiltrate to `models.litellm.cloud` | **Yes** | No route to internet; Caddy only proxies to `api.anthropic.com` |
+
+**Remaining gap:** A sophisticated attacker could encode exfiltrated data in the *body* of legitimate-looking Anthropic API requests (e.g., stuffing the key into a prompt). This is a covert-channel concern common to all allowlist-based egress filtering — mitigating it would require deep packet inspection of API request bodies, which is out of scope.
+
+### TLS trust chain
+
+```
+proxy ──TLS (internal CA)──→ caddy-sidecar:8081 ──TLS (public CA)──→ api.anthropic.com:443
+```
+
+The proxy trusts the internal CA for the first hop. Caddy uses the system trust store (Alpine's `ca-certificates`) for the second hop to Anthropic's public endpoint.
+
+### Rollback
+
+To restore direct proxy internet access (e.g., for debugging):
+
+1. Add `ext_net` back to the proxy service's `networks`
+2. Restore `dns: [8.8.8.8, 1.1.1.1]` on the proxy service
+3. Revert `api_base` in `proxy_config.yaml` to `https://api.anthropic.com`
+
+---
 
 ## claude-server
 

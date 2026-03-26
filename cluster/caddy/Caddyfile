@@ -14,16 +14,17 @@
 }
 
 
-# EGRESS
-https://:8080 {
-    reverse_proxy https://host.docker.internal:443 {
-        # Use {$VAR} syntax and wrap in quotes
-        header_up Host "{$HOST_DOMAIN}"
+# --- EGRESS: Anthropic API only ---
+# LiteLLM proxy routes outbound Anthropic calls through this endpoint.
+# Only api.anthropic.com is permitted — all other upstream targets are blocked.
+:8081 {
+    tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
+
+    reverse_proxy https://api.anthropic.com:443 {
+        # Preserve the original Host header so Anthropic sees the correct SNI/Host
+        header_up Host api.anthropic.com
         transport http {
-            # This bypasses the CN/SAN check
-            tls_insecure_skip_verify 
-            tls_server_name "{$HOST_DOMAIN}"
+            tls_server_name api.anthropic.com
         }
     }
 }
-
