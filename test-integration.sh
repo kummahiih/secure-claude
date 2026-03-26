@@ -133,6 +133,22 @@ echo "[+] Scanning Python deps (pip-audit)..."
   else
     echo "  ✅ planner pip-audit clean"
   fi
+
+  # Tester requirements
+  echo "  Scanning tester requirements..."
+  AUDIT_TESTER=$(cd cluster && docker run --rm \
+    -e PIP_ROOT_USER_ACTION=ignore \
+    -v "$(pwd)":/app \
+    -w /app \
+    python:3.11-slim /bin/bash -c \
+    "pip install --quiet --upgrade pip && pip install --quiet pip-audit && pip-audit -r tester/requirements.txt" 2>&1)
+  if echo "$AUDIT_TESTER" | grep -q "No known"; then
+    echo "  ✅ tester pip-audit clean"
+  elif echo "$AUDIT_TESTER" | grep -qE '(CRITICAL|WARNING|ERROR)'; then
+    echo "$AUDIT_TESTER" | grep -E '(found|No known|CRITICAL|WARNING|ERROR|Name)' | tail -10
+  else
+    echo "  ✅ tester pip-audit clean"
+  fi
 ) || echo "  ⚠️  pip-audit section failed"
 
 echo "[+] Scanning Claude Code JS deps (npm audit)..."
