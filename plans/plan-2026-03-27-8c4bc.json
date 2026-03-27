@@ -1,0 +1,52 @@
+{
+  "id": "plan-20260327-215303",
+  "goal": "Fix RR-2: Add timeout to test subprocess in tester-server to prevent indefinite hangs and DoS",
+  "status": "completed",
+  "created": "2026-03-27T21:53:03.895701+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add context.WithTimeout to test subprocess execution",
+      "files": [
+        "cluster/tester/main.go"
+      ],
+      "action": "In handleRun's goroutine (line ~83-107), wrap the subprocess execution with a timeout context:\n1. Add `\"context\"` to the import block.\n2. Before `exec.Command`, create a timeout context: `ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)` and `defer cancel()`. Use 300s (5 min) \u2014 well under the 600s Claude Code subprocess timeout, leaving headroom.\n3. Replace `exec.Command(\"bash\", testScript)` with `exec.CommandContext(ctx, \"bash\", testScript)`.\n4. Set `cmd.WaitDelay = 10 * time.Second` so child processes get 10s to exit after the context cancels before being killed.\n5. In the error-handling block after `CombinedOutput()`, detect context deadline exceeded: if `ctx.Err() == context.DeadlineExceeded`, set a specific output message like `\"test timed out after 300s\"` and use exit code 124 (matching the `timeout` command convention).\n6. Optionally make the timeout configurable via a `TEST_TIMEOUT` env var (default 300s), parsed with `time.ParseDuration` or `strconv.Atoi`.",
+      "verify": "run_tests passes. Manually confirm: `go vet ./...` and `go build` succeed in cluster/tester/.",
+      "done": "exec.CommandContext with a deadline replaces bare exec.Command; WaitDelay is set; timeout error is detected and reported with exit code 124.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add unit tests for timeout behaviour",
+      "files": [
+        "cluster/tester/main_test.go"
+      ],
+      "action": "Create `cluster/tester/main_test.go` with tests covering the timeout fix and existing handler logic:\n1. `TestRunTimeout` \u2014 set `TEST_SCRIPT` env to a script that sleeps forever (`sleep 999`), and set `TEST_TIMEOUT` to `2s`. POST /run, poll /results, assert status is `fail`, exit_code is 124, and output contains `timed out`.\n2. `TestRunSuccess` \u2014 set `TEST_SCRIPT` to a script that exits 0 (`echo ok`). POST /run, poll /results, assert status is `pass`.\n3. `TestRunFailure` \u2014 set `TEST_SCRIPT` to a script that exits 1. POST /run, poll /results, assert status is `fail` and exit_code is 1.\n4. `TestRunConflict` \u2014 start a long-running test, immediately POST /run again, assert 409 Conflict.\n5. Use `httptest.NewServer` with `setupRouter(\"test-token\")`. Create temp scripts via `os.CreateTemp` + `chmod +x`.\n6. Set Bearer token header to `test-token` on all requests.",
+      "verify": "run_tests passes. `cd cluster/tester && go test -v -timeout 30s` passes all tests.",
+      "done": "main_test.go exists with at least TestRunTimeout, TestRunSuccess, TestRunFailure, TestRunConflict \u2014 all passing.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Add test.sh for tester sub-repo",
+      "files": [
+        "cluster/tester/test.sh"
+      ],
+      "action": "Create `cluster/tester/test.sh` (executable, `#!/usr/bin/env bash`, `set -euo pipefail`) that runs:\n1. `go vet ./...`\n2. `go test -v -timeout 60s ./...`\nFollow the pattern of existing sub-repo test.sh files (e.g. cluster/agent/test.sh). Keep it minimal.",
+      "verify": "run_tests passes. `bash cluster/tester/test.sh` exits 0.",
+      "done": "cluster/tester/test.sh exists, is executable, runs go vet + go test, and passes.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update tester PLAN.md to reflect completed work",
+      "files": [
+        "cluster/tester/docs/PLAN.md"
+      ],
+      "action": "Mark these items as completed in the TODO section:\n- [x] Unit tests (main_test.go)\n- [x] test.sh for this repo\nAdd a new 'Completed' entry noting the timeout fix: `- [x] Subprocess timeout (context.WithTimeout, 300s default, RR-2)`.",
+      "verify": "File reads correctly with updated checkboxes.",
+      "done": "PLAN.md reflects the timeout fix and unit tests as completed.",
+      "status": "completed"
+    }
+  ]
+}
