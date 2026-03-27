@@ -292,11 +292,9 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### ~~RR-1: tls_insecure_skip_verify on Egress Proxy~~ — RESOLVED (2026-03-27)
 - **Status:** Fixed. The `:8080` general-purpose egress proxy and `tls_insecure_skip_verify` have been removed entirely. Replaced with a dedicated `:8081` Caddy listener that reverse-proxies exclusively to `api.anthropic.com:443` using public TLS (proper certificate verification). The proxy container has been moved to `int_net` only — it no longer has direct internet access. See §5 "Egress Filtering" mitigation.
 
-### RR-2: No Timeout on Test Subprocess
-- **Severity:** Medium  
-- **Likelihood:** Medium (any misbehaving test.sh will trigger this)  
-- **Description:** `tester/main.go` executes `cmd.CombinedOutput()` (line 90) with no deadline or timeout. A test that hangs indefinitely will block the tester-server goroutine indefinitely. While the mutex prevents concurrent runs, the server will appear to have a permanently "running" test and never accept new run requests. The 600s Claude Code subprocess timeout may expire before the test completes, leaving the tester in a stuck state. An adversarially crafted `test.sh` (via workspace write) containing an infinite loop achieves effective DoS of the tester service.
-- **Recommendation (PLAN.md Phase 5):** Add `cmd.WaitDelay` or `context.WithTimeout` around `cmd.CombinedOutput()`. Also add memory caps via `ulimit` or cgroup limits.
+### ~~RR-2: No Timeout on Test Subprocess~~ — RESOLVED (2026-03-27)
+- **Status:** Fixed. `tester/main.go` now uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT` env var) with `exec.CommandContext` and `cmd.WaitDelay = 10s`. Timed-out tests return exit code 124 (matching `timeout` command convention). See tester `PLAN.md` for details.
+- **Remaining recommendation:** Add memory caps via `ulimit` or cgroup limits (tracked under RR-3).
 
 ### RR-3: No Resource Limits on Containers — PARTIALLY RESOLVED (2026-03-27)
 - **Severity:** Medium  
@@ -389,7 +387,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **mcp-server (Go)** | Token shared with 2 other services (RR-4) | — | File content fully logged (RR-5) | File content in logs (RR-5) | No resource limits (RR-3) | No cap_drop (RR-9) |
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
 | **plan-server** | Shared MCP_API_TOKEN (RR-4) | Plan content injection (RR-14) | — | — | — | — |
-| **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | No subprocess timeout (RR-2); no resource limits (RR-3) | No cap_drop (RR-9) |
+| **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; no resource limits (RR-3) | No cap_drop (RR-9) |
 | **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory (egress locked to api.anthropic.com) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
 
@@ -419,7 +417,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | Priority | Risk | Action | Status |
 |----------|------|--------|--------|
 | ~~P1~~ | ~~RR-1~~ | ~~Remove `tls_insecure_skip_verify`; provision host nginx with CA-signed cert~~ | ✅ Done (2026-03-27) — replaced with domain-locked egress to api.anthropic.com, proxy moved to int_net only |
-| P1 | RR-2 | Add timeout (`context.WithTimeout`) to tester subprocess | Open |
+| ~~P1~~ | ~~RR-2~~ | ~~Add timeout (`context.WithTimeout`) to tester subprocess~~ | ✅ Done (2026-03-27) — 300s default via `context.WithTimeout` + `cmd.WaitDelay`; configurable via `TEST_TIMEOUT` env var |
 | P2 | RR-3 | Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml` | Partial — caddy-sidecar + proxy done; 4 remaining |
 | P2 | RR-4 | Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN` | Open |
 | P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` | Open |

@@ -84,8 +84,11 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   listener hardcoded to `api.anthropic.com:443`; proxy moved to `int_net` only
   (no direct internet); `tls_insecure_skip_verify` removed entirely. See
   `HARDENING.md` egress filtering section.
-- [ ] **RR-2** Add `context.WithTimeout` (or `cmd.WaitDelay`) around
-  `cmd.CombinedOutput()` in `tester/main.go` to prevent indefinite hangs.
+- [X] **RR-2** ~~Add `context.WithTimeout` (or `cmd.WaitDelay`) around
+  `cmd.CombinedOutput()` in `tester/main.go` to prevent indefinite hangs.~~
+  Done (2026-03-27). 300s default timeout via `context.WithTimeout` +
+  `cmd.WaitDelay = 10s`; configurable via `TEST_TIMEOUT` env var; exit code 124
+  on timeout.
 
 ### P2 — High
 
@@ -169,5 +172,5 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 | Claude changes API contracts during task execution | Broken code | High | System prompt constraint + plan action specificity |
 | Subprocess timeout too short for complex tasks | Incomplete work | Medium | 600s timeout; plan smaller tasks |
 | Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; test runner gate in Phase 4 |
-| Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution (RR-2) |
+| ~~Test runner subprocess hangs indefinitely~~ | ~~Resource exhaustion~~ | ~~Low~~ | ✅ Fixed: 300s `context.WithTimeout` + `cmd.WaitDelay` in `tester/main.go` (RR-2) |
 | Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in test-integration.sh with network access |
