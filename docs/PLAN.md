@@ -79,9 +79,11 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
 
 ### P1 — Critical
 
-- [ ] **RR-1** Remove `tls_insecure_skip_verify` from `caddy/Caddyfile`; provision
-  host nginx with a cert signed by the cluster CA (or a trusted public CA) and
-  add `tls_trusted_ca_certs` pointing to the appropriate bundle.
+- [X] **RR-1** ~~Remove `tls_insecure_skip_verify` from `caddy/Caddyfile`~~ — Done
+  (2026-03-27). Replaced with domain-locked egress: dedicated Caddy `:8081`
+  listener hardcoded to `api.anthropic.com:443`; proxy moved to `int_net` only
+  (no direct internet); `tls_insecure_skip_verify` removed entirely. See
+  `HARDENING.md` egress filtering section.
 - [ ] **RR-2** Add `context.WithTimeout` (or `cmd.WaitDelay`) around
   `cmd.CombinedOutput()` in `tester/main.go` to prevent indefinite hangs.
 
@@ -89,6 +91,9 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
 
 - [ ] **RR-3** Add `mem_limit`, `cpus`, and `pids_limit` to all containers in
   `docker-compose.yml`; add `ulimit` to the test subprocess in `tester/main.go`.
+  *Partial (2026-03-27):* `caddy-sidecar` has `pids_limit: 100`, `read_only`,
+  sized `tmpfs`. `proxy` has `pids_limit: 150`, `read_only`, sized `tmpfs`.
+  Remaining: claude-server, mcp-server, plan-server, tester-server.
 - [ ] **RR-4** Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from
   `MCP_API_TOKEN` to limit blast radius of a single token compromise.
 - [ ] **RR-5** Remove or reduce the `FILE_SUCCESS` full-content log line in
@@ -106,6 +111,8 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   endpoints (Caddy rate-limit directive or FastAPI semaphore).
 - [ ] **RR-9** Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`,
   `plan-server`, and `tester-server` in `docker-compose.yml`.
+  *Partial (2026-03-27):* `caddy-sidecar` and `proxy` now have `cap_drop: ALL`.
+  Remaining: claude-server, mcp-server, plan-server, tester-server.
 
 ### P4 — Low / Polish
 
@@ -121,6 +128,24 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   before passing it to the `--model` subprocess flag.
 - [ ] Tag a release
 
+### Additional hardening completed (not in original threat model)
+
+- [X] **Egress filtering architecture** — proxy moved to `int_net` only; all
+  outbound traffic routed through `caddy-sidecar:8081` which is hardcoded to
+  `api.anthropic.com:443`. Blocks credential exfiltration to arbitrary domains.
+- [X] **Container read-only filesystems** — `caddy-sidecar` and `proxy` have
+  `read_only: true` with sized `tmpfs` mounts (`noexec,nosuid`).
+- [X] **Caddy file capability stripping** — `setcap -r /usr/bin/caddy` in
+  `Dockerfile.caddy` enables `cap_drop: ALL` without startup failures.
+- [X] **CA certificate extensions** — added `basicConstraints`, `keyUsage`,
+  `subjectKeyIdentifier` to internal CA for OpenSSL 3.x compatibility.
+- [X] **Dependency security** — `requests` upgraded to 2.33.0 (vuln fix);
+  `Dockerfile.claude` base image pinned to digest; `pip-audit` added for
+  tester requirements in integration tests.
+- [X] **Hardening documentation** — new `docs/HARDENING.md` with per-container
+  security decisions, TeamPCP supply-chain attack analysis, and egress
+  filtering architecture.
+
 Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 [planner PLAN.md](../cluster/planner/docs/PLAN.md),
 [tester PLAN.md](../cluster/tester/docs/PLAN.md)
@@ -132,7 +157,7 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 - `git_push` / GitHub integration (requires credential isolation design)
 - CI/CD pipeline for parent repo
 - Multi-agent orchestration (review agent checking coding agent)
-- Separate PLAN_API_TOKEN (currently shares MCP_API_TOKEN)
+- Separate PLAN_API_TOKEN / TESTER_API_TOKEN (tracked as RR-4 in Phase 5)
 
 ---
 
@@ -144,5 +169,5 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 | Claude changes API contracts during task execution | Broken code | High | System prompt constraint + plan action specificity |
 | Subprocess timeout too short for complex tasks | Incomplete work | Medium | 600s timeout; plan smaller tasks |
 | Agent marks tasks complete without verifying | Correctness | Medium | Verify criteria in plan; test runner gate in Phase 4 |
-| Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution |
+| Test runner subprocess hangs indefinitely | Resource exhaustion | Low | Phase 5: add timeout to test execution (RR-2) |
 | Vuln DB staleness in offline scans | Missed CVEs | Low | Security scans run in test-integration.sh with network access |

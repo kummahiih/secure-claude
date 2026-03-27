@@ -1,6 +1,6 @@
 # Threat Model: secure-claude
 
-**Date:** 2026-03-26  
+**Date:** 2026-03-26 (updated 2026-03-27)  
 **Scope:** secure-claude cluster — hardened containerised environment for running Claude Code as an autonomous AI agent  
 **Classification:** Internal Engineering Review
 
@@ -10,7 +10,7 @@
 
 | Asset | Confidentiality | Integrity | Availability | Location |
 |-------|----------------|-----------|--------------|----------|
-| `ANTHROPIC_API_KEY` | Critical — billing/abuse if leaked | High — must not be altered | Medium | `proxy` container only, host `.secrets.env` |
+| `ANTHROPIC_API_KEY` | Critical — billing/abuse if leaked | High — must not be altered | Medium | `proxy` container only (int_net, no direct internet), host `.secrets.env` |
 | `DYNAMIC_AGENT_KEY` | High — grants API access via proxy | High | High | `claude-server`, `proxy` |
 | `CLAUDE_API_TOKEN` | High — gates external agent invocation | High | High | `claude-server` only |
 | `MCP_API_TOKEN` | High — shared internal service auth | High | High | `claude-server`, `mcp-server`, `plan-server`, `tester-server` |
@@ -34,24 +34,30 @@
        │  HTTPS/TLS 1.3, Bearer CLAUDE_API_TOKEN
        ▼
 [caddy-sidecar :8443]  ← only container on ext_net + int_net
-       │  HTTPS, internal CA, no auth header added
-       ▼
-[claude-server :8000]  ← int_net only
-  │  subprocess ANTHROPIC_API_KEY=DYNAMIC_AGENT_KEY
-  ├──────────────────────────────────────────────────────────►[Anthropic API]
-  │                            via proxy:4000 (int_net)
-  │  stdio JSON-RPC  ┌──────────────────────────┐
-  ├──────────────────► mcp-watchdog (in-process) │
-  │                  └──────────┬───────────────┘
-  │                             │ blocks 40+ attack classes
-  │                  ┌──────────▼───────────────┐
-  │  HTTP REST over  │ files_mcp.py → mcp-server:8443 (Bearer MCP_API_TOKEN)
-  │  internal HTTPS  │ plan_mcp.py → plan-server:8443 (Bearer MCP_API_TOKEN)
-  │                  │ tester_mcp.py → tester-server:8443 (Bearer MCP_API_TOKEN)
-  │                  │ git_mcp.py → git subprocess (env-locked GIT_DIR)
-  │                  │ docs_mcp.py → /docs read-only filesystem
-  │                  └──────────────────────────┘
-  │
+  │    │  HTTPS, internal CA, no auth header added
+  │    ▼
+  │  [claude-server :8000]  ← int_net only
+  │    │  subprocess ANTHROPIC_API_KEY=DYNAMIC_AGENT_KEY
+  │    ├──────────────────────────────────────────────────────►[proxy :4000]
+  │    │                                                        (int_net only)
+  │    │  stdio JSON-RPC  ┌──────────────────────────┐          │
+  │    ├──────────────────► mcp-watchdog (in-process) │          │
+  │    │                  └──────────┬───────────────┘          │
+  │    │                             │ blocks 40+ attack classes│
+  │    │                  ┌──────────▼───────────────┐          │
+  │    │  HTTP REST over  │ files_mcp.py → mcp-server:8443     │
+  │    │  internal HTTPS  │ plan_mcp.py → plan-server:8443     │
+  │    │                  │ tester_mcp.py → tester-server:8443  │
+  │    │                  │ git_mcp.py → git subprocess         │
+  │    │                  │ docs_mcp.py → /docs read-only       │
+  │    │                  └──────────────────────────┘          │
+  │    │                                                        │
+  │  [caddy-sidecar :8081]  ◄──────────────────────────────────┘
+  │    │  Egress proxy — hardcoded upstream: api.anthropic.com:443 only
+  │    │  Host header + TLS SNI set to api.anthropic.com
+  │    ▼
+  [Anthropic API]
+
 [mcp-server :8443]     os.OpenRoot jail at /workspace
 [plan-server :8443]    /plans only, no workspace/git/secrets
 [tester-server :8443]  /workspace:ro, no git/plans/secrets
@@ -71,8 +77,9 @@
 | claude-server → MCP servers | Bearer MCP_API_TOKEN, TLS + internal CA, `VERIFY=/app/certs/ca.crt` |
 | MCP stdio → Go/REST backends | mcp-watchdog intercepts all JSON-RPC before forwarding |
 | Agent subprocess → filesystem | `/workspace` mounted ro in claude-server; writes only via mcp-server's os.OpenRoot jail |
-| claude-server → Anthropic | DYNAMIC_AGENT_KEY only (not real key); route via proxy |
-| Host → container | UID 1000, no Docker socket, capability restrictions |
+| claude-server → Anthropic | DYNAMIC_AGENT_KEY only (not real key); route via proxy (int_net only) → caddy-sidecar:8081 → api.anthropic.com |
+| proxy → Internet | **No direct access.** Proxy is int_net only; egress exclusively via caddy-sidecar:8081, hardcoded to api.anthropic.com:443 |
+| Host → container | UID 1000, no Docker socket, `cap_drop: ALL` on caddy-sidecar + proxy |
 | plan-server ↔ workspace | Structurally separated — plan-server has no `/workspace` mount |
 
 ---
@@ -102,14 +109,14 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 #### Container Escape
 - **Attack:** Exploit kernel vulnerability, Docker breakout via mounted socket, or privileged container.
-- **Prerequisites:** No Docker socket is mounted. No `--privileged`. UID 1000. Only `proxy` has explicit `cap_drop: ALL` (`claude-server`, `mcp-server`, `plan-server`, `tester-server` do not set `cap_drop`).
+- **Prerequisites:** No Docker socket is mounted. No `--privileged`. UID 1000. `proxy` and `caddy-sidecar` have `cap_drop: ALL` + `read_only: true` + `pids_limit`. `claude-server`, `mcp-server`, `plan-server`, `tester-server` do not yet set `cap_drop`.
 - **Impact:** Host compromise; access to `.secrets.env` and real API key.
-- **Residual risk:** Medium — no `cap_drop: ALL` on most containers leaves default Linux capabilities (e.g., `CAP_CHOWN`, `CAP_DAC_READ_SEARCH` subset) in scope.
+- **Residual risk:** Medium-Low — `cap_drop: ALL` now covers the two internet-facing containers (caddy-sidecar, proxy). Remaining containers still have default Linux capabilities (see RR-9).
 
 #### Network Segmentation Bypass
 - **Attack:** Compromise `caddy-sidecar` (which sits on both `ext_net` and `int_net`) to pivot to internal services.
-- **Prerequisites:** RCE in Caddy or its config. Config is mounted read-only. Caddy runs as non-root.
-- **Impact:** Direct access to `mcp-server`, `plan-server`, `tester-server` at HTTPS layer. Still requires `MCP_API_TOKEN` for auth.
+- **Prerequisites:** RCE in Caddy or its config. Config is mounted read-only. Caddy runs as non-root. Now hardened with `cap_drop: ALL`, `read_only: true`, `pids_limit: 100`.
+- **Impact:** Direct access to `mcp-server`, `plan-server`, `tester-server` at HTTPS layer. Still requires `MCP_API_TOKEN` for auth. Caddy is the only container with both `ext_net` and `int_net` access (proxy removed from `ext_net` as of 2026-03-27).
 
 #### Volume Mount Traversal
 - **Attack:** Abuse the git gitdir mount (`./workspace/.git:/gitdir`) — if `workspace` is a symlink pointing to a sensitive directory, `/gitdir` could expose unexpected content.
@@ -123,9 +130,9 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 #### TLS Downgrade / MITM on Internal Network
 - **Attack:** Intercept service-to-service traffic on `int_net` Docker bridge.
-- **Egress path:** `Caddyfile` uses `tls_insecure_skip_verify` for the HTTPS egress proxy to `host.docker.internal:443` (line 24). This disables certificate verification, allowing MITM of outbound traffic from the cluster to the host nginx.
-- **Impact (egress):** Attacker on the Docker host network can intercept and modify Anthropic API responses or inject crafted LLM outputs.
-- **Impact (internal):** Internal services verify `ca.crt` — mitigated except for the egress path.
+- **Egress path (RESOLVED 2026-03-27):** ~~`Caddyfile` uses `tls_insecure_skip_verify` for the HTTPS egress proxy to `host.docker.internal:443`.~~ The general-purpose egress proxy has been replaced with a dedicated `:8081` listener that uses proper public TLS to `api.anthropic.com:443`. The proxy container is now `int_net` only with no direct internet access.
+- **Impact (egress):** Previously high; now mitigated by proper TLS verification on the Caddy→Anthropic hop and domain-locked egress.
+- **Impact (internal):** Internal services verify `ca.crt` — mitigated.
 
 ---
 
@@ -138,8 +145,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Note on `mcp-watchdog`:** The watchdog intercepts MCP JSON-RPC and blocks 40+ attack classes, providing defence-in-depth. However, the watchdog operates on tool *calls*, not on tool *return values*. Injected content in file reads is not sanitised before being presented to the LLM.
 
 #### Tool Poisoning via MCP Response Manipulation
-- **Attack:** An adversary who can intercept or modify HTTPS traffic between `files_mcp.py` and `mcp-server` (e.g., via the `tls_insecure_skip_verify` egress gap, or by compromising a dependency) crafts responses that cause the agent to take unintended actions — e.g., a file read returns content designed to instruct the agent to write secrets to disk.
-- **Prerequisites:** Network position or compromised `mcp-watchdog`/`requests` library. Internal service-to-service paths use proper TLS.
+- **Attack:** An adversary who can intercept or modify HTTPS traffic between `files_mcp.py` and `mcp-server` crafts responses that cause the agent to take unintended actions — e.g., a file read returns content designed to instruct the agent to write secrets to disk.
+- **Prerequisites:** Network position or compromised `mcp-watchdog`/`requests` library. Internal service-to-service paths use proper TLS. ~~The `tls_insecure_skip_verify` egress gap~~ (removed 2026-03-27) is no longer a vector.
 - **Impact:** High if tool responses are manipulated — agent fully trusts MCP tool results.
 
 #### Plan Manipulation
@@ -167,7 +174,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 #### Token Exfiltration via Tool Calls
 - **Attack:** The agent is instructed (via prompt injection) to read `os.environ` values (which it cannot directly) or to call `grep_files` with a pattern targeting known secret markers in code (e.g., `grep_files("ANTHROPIC_API_KEY")`) and then write results to a file or embed them in a commit message.
 - **Specific risk:** `claude-server/server.py` logs `result.stdout` at INFO level (line 107-111), which includes the full Claude Code conversation output. If the agent echoes a secret in its response text, it appears in server logs.
-- **Exfiltration channel:** Agent writes content to `/workspace` via `write_file` or `append_file`; this content is later accessible via git (committed to history) or directly from the host mount.
+- **Exfiltration channel:** Agent writes content to `/workspace` via `write_file` or `append_file`; this content is later accessible via git (committed to history) or directly from the host mount. Network exfiltration is blocked — proxy is int_net only and egress is locked to `api.anthropic.com` (though covert-channel encoding in API request bodies remains a theoretical risk).
 - **Token available in subprocess env:** `MCP_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `CLAUDE_API_TOKEN`, `MCP_SERVER_URL`, `PLAN_SERVER_URL`, `TESTER_SERVER_URL` are all in `os.environ` of the Claude Code subprocess (passed via `env={**os.environ, ...}` in `server.py`).
 - **Impact:** Compromise of MCP_API_TOKEN allows direct access to all internal services. DYNAMIC_AGENT_KEY compromise allows unbounded API spend via the proxy.
 
@@ -236,7 +243,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - System prompts (`/app/prompts/`) and slash commands (`/home/appuser/.claude/commands/`) are owned by `root:root` with mode `555` (directories) and `444` (files). `verify_isolation.py` checks this at startup (check 9). The agent (UID 1000) cannot modify or create files in these directories.
 
 ### Non-root Containers
-- All containers run as UID 1000. `proxy` has `cap_drop: ALL` and `user: "1000:1000"`. Others have `user: "1000:1000"` but no explicit `cap_drop`.
+- All containers run as UID 1000. `proxy` and `caddy-sidecar` have `cap_drop: ALL`. Others have `user: "1000:1000"` but no explicit `cap_drop` yet (see RR-9).
 
 ### Read-only Mounts
 - `/workspace` is mounted ro in `claude-server` and `tester-server`. Writes only go through `mcp-server`.
@@ -258,15 +265,32 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### Constant-time Token Comparison
 - All token comparisons use `secrets.compare_digest` (Python) or `subtle.ConstantTimeCompare` (Go) to prevent timing attacks.
 
+### Egress Filtering (added 2026-03-27)
+- **Proxy removed from `ext_net`** — the proxy container (which holds `ANTHROPIC_API_KEY`) is now `int_net` only with no direct internet access, no external DNS.
+- **Caddy egress proxy on `:8081`** — a dedicated Caddy listener forwards exclusively to `api.anthropic.com:443` with hardcoded `Host` header and `tls_server_name`. The proxy routes all Anthropic API calls through `caddy-sidecar:8081` via `api_base` in `proxy_config.yaml`.
+- **`tls_insecure_skip_verify` removed** — the old general-purpose `:8080` egress proxy (which skipped TLS verification to `host.docker.internal`) has been replaced. The new `:8081` endpoint uses public TLS to `api.anthropic.com`.
+- **Supply-chain exfiltration blocked** — a compromised LiteLLM process cannot reach arbitrary domains; only `api.anthropic.com` is reachable. Documented in `HARDENING.md` with full TeamPCP attack analysis.
+
+### Container Hardening — caddy-sidecar and proxy (added 2026-03-27)
+- **caddy-sidecar:** `cap_drop: ALL`, `read_only: true`, `pids_limit: 100`, `tmpfs: /tmp:noexec,nosuid,size=64m`. Dockerfile strips file capabilities from `/usr/bin/caddy` (`setcap -r`) to allow `cap_drop: ALL`.
+- **proxy:** `cap_drop: ALL`, `read_only: true`, `pids_limit: 150`, `tmpfs: /tmp:noexec,nosuid,size=256m`. Blocks filesystem persistence, fork bombs, and binary execution from tmpfs.
+- **`no-new-privileges` deferred** — kernel 6.17.0-19 does not support it (documented in `HARDENING.md`).
+
+### CA Certificate Hardening (added 2026-03-27)
+- Internal CA certificate now includes `basicConstraints=critical,CA:TRUE,pathlen:0`, `keyUsage=critical,keyCertSign,cRLSign`, and `subjectKeyIdentifier=hash` — required for OpenSSL 3.x compatibility. `pathlen:0` prevents signing intermediate CAs.
+
+### Dependency Management (added 2026-03-27)
+- `requests` upgraded from 2.32.5 to 2.33.0 (vulnerability fix).
+- `Dockerfile.claude` base image pinned to digest for supply-chain reproducibility.
+- `pip-audit` scanning added for tester requirements in `test-integration.sh`.
+- Centralized `requirements-dev.txt` for local development dependencies.
+
 ---
 
 ## 6. Residual Risks
 
-### RR-1: tls_insecure_skip_verify on Egress Proxy
-- **Severity:** High  
-- **Likelihood:** Low (requires network position on Docker host)  
-- **Description:** `caddy/Caddyfile` line 24: `tls_insecure_skip_verify` disables certificate verification for the `https://:8080` egress proxy to `host.docker.internal:443`. An attacker with control of the Docker host bridge network can intercept and modify outbound traffic from the cluster to the host nginx. Modified responses could include adversarial Anthropic API responses crafted to influence the agent.
-- **Mitigation (acknowledged in PLAN.md Phase 5):** Provision host nginx with a cert signed by the cluster's internal CA (or a public CA). Remove `tls_insecure_skip_verify`. Add `tls_trusted_ca_certs` pointing to the appropriate bundle.
+### ~~RR-1: tls_insecure_skip_verify on Egress Proxy~~ — RESOLVED (2026-03-27)
+- **Status:** Fixed. The `:8080` general-purpose egress proxy and `tls_insecure_skip_verify` have been removed entirely. Replaced with a dedicated `:8081` Caddy listener that reverse-proxies exclusively to `api.anthropic.com:443` using public TLS (proper certificate verification). The proxy container has been moved to `int_net` only — it no longer has direct internet access. See §5 "Egress Filtering" mitigation.
 
 ### RR-2: No Timeout on Test Subprocess
 - **Severity:** Medium  
@@ -274,11 +298,11 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Description:** `tester/main.go` executes `cmd.CombinedOutput()` (line 90) with no deadline or timeout. A test that hangs indefinitely will block the tester-server goroutine indefinitely. While the mutex prevents concurrent runs, the server will appear to have a permanently "running" test and never accept new run requests. The 600s Claude Code subprocess timeout may expire before the test completes, leaving the tester in a stuck state. An adversarially crafted `test.sh` (via workspace write) containing an infinite loop achieves effective DoS of the tester service.
 - **Recommendation (PLAN.md Phase 5):** Add `cmd.WaitDelay` or `context.WithTimeout` around `cmd.CombinedOutput()`. Also add memory caps via `ulimit` or cgroup limits.
 
-### RR-3: No Resource Limits on Containers
+### RR-3: No Resource Limits on Containers — PARTIALLY RESOLVED (2026-03-27)
 - **Severity:** Medium  
 - **Likelihood:** Low (requires agent misbehaviour or adversarial workspace)  
-- **Description:** `docker-compose.yml` has no `mem_limit`, `cpus`, `pids_limit`, or `ulimits` on any container. A memory-exhausting test run, a runaway agent subprocess, or a large file write could OOM the host, affecting all containers. `tester-server` runs arbitrary code from `/workspace/test.sh` with no resource accounting.
-- **Recommendation:** Add `mem_limit: 2g` (or appropriate value), `cpus: 2.0`, `pids_limit: 512` to all containers, especially `tester-server`. Add `ulimit` to the test subprocess in `tester/main.go`.
+- **Description:** `caddy-sidecar` now has `pids_limit: 100`, `read_only: true`, `tmpfs` with size cap. `proxy` now has `pids_limit: 150`, `read_only: true`, `tmpfs` with size cap. However, `claude-server`, `mcp-server`, `plan-server`, and `tester-server` still have no `mem_limit`, `cpus`, `pids_limit`, or `ulimits`. `tester-server` runs arbitrary code from `/workspace/test.sh` with no resource accounting.
+- **Remaining recommendation:** Add `mem_limit`, `cpus`, `pids_limit` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`. Add `ulimit` to the test subprocess in `tester/main.go`.
 
 ### RR-4: Shared MCP_API_TOKEN Across Three Services
 - **Severity:** Medium  
@@ -310,11 +334,11 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Description:** No rate limiting is applied at the Caddy or FastAPI layer. An authenticated caller can submit unlimited concurrent requests to `/ask`, each spawning a 600-second `claude` subprocess. This could exhaust host resources (CPU, memory) and run up API costs unboundedly.
 - **Recommendation:** Add a Caddy rate-limit directive or a FastAPI semaphore/queue. Enforce a maximum of N concurrent agent subprocesses.
 
-### RR-9: Missing cap_drop on Most Containers
+### RR-9: Missing cap_drop on Most Containers — PARTIALLY RESOLVED (2026-03-27)
 - **Severity:** Low  
 - **Likelihood:** Low  
-- **Description:** Only the `proxy` container has `cap_drop: ALL`. `claude-server`, `mcp-server`, `plan-server`, and `tester-server` run as UID 1000 but retain default Linux capabilities (e.g., `CAP_NET_BIND_SERVICE`, `CAP_SETUID` subset available to non-root users). This slightly increases the attack surface for container escape exploits.
-- **Recommendation:** Add `cap_drop: [ALL]` to all remaining containers.
+- **Description:** `proxy` and `caddy-sidecar` now have `cap_drop: ALL`. `claude-server`, `mcp-server`, `plan-server`, and `tester-server` still run as UID 1000 but retain default Linux capabilities.
+- **Remaining recommendation:** Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, and `tester-server`.
 
 ### RR-10: Cert Validity 365 Days, No Rotation Mechanism
 - **Severity:** Low  
@@ -358,7 +382,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
-| **Caddy ingress** | Token theft (RR-8 no rate limit) | tls_insecure_skip_verify egress (RR-1) | No request audit log | Egress MITM (RR-1) | No rate limit (RR-8) | — |
+| **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 fixed) | No request audit log | ~~Egress MITM~~ (RR-1 fixed) | No rate limit (RR-8) | — |
 | **claude-server** | — | Prompt injection via workspace (§4.2) | Full stdout logging (RR-11) | Env vars in subprocess scope (§4.1); log leakage (RR-11) | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
@@ -366,7 +390,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
 | **plan-server** | Shared MCP_API_TOKEN (RR-4) | Plan content injection (RR-14) | — | — | — | — |
 | **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | No subprocess timeout (RR-2); no resource limits (RR-3) | No cap_drop (RR-9) |
-| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory | — | cap_drop: ALL ✓ |
+| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory (egress locked to api.anthropic.com) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
 
 ---
@@ -385,25 +409,27 @@ The following controls are notably above baseline for an "AI agent in a containe
 8. **Constant-time token comparison** in all token verification paths.
 9. **DYNAMIC_AGENT_KEY substitution** — the agent never holds the real Anthropic API key.
 10. **MCP config as a build artifact** — the agent cannot modify which tools it has access to at runtime.
+11. **Domain-locked egress filtering** (added 2026-03-27) — the proxy container (holding `ANTHROPIC_API_KEY`) has no direct internet access; all outbound traffic routes through a dedicated Caddy endpoint hardcoded to `api.anthropic.com:443` only, blocking credential exfiltration to arbitrary domains.
+12. **Read-only root filesystems** on internet-adjacent containers (caddy-sidecar, proxy) — prevents persistence artifacts from supply-chain attacks.
 
 ---
 
 ## 9. Recommended Mitigations (Priority Order)
 
-| Priority | Risk | Action |
-|----------|------|--------|
-| P1 | RR-1 | Remove `tls_insecure_skip_verify`; provision host nginx with CA-signed cert |
-| P1 | RR-2 | Add timeout (`context.WithTimeout`) to tester subprocess |
-| P2 | RR-3 | Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml` |
-| P2 | RR-4 | Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN` |
-| P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` |
-| P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG |
-| P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg |
-| P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion |
-| P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints |
-| P3 | RR-9 | Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server` |
-| P4 | RR-12 | Upgrade Go servers to `tls.VersionTLS13` |
-| P4 | RR-13 | Document test output as a trust boundary; consider output length cap |
-| P4 | RR-14 | Add field length limits to plan creation; consider human review gate |
-| P4 | RR-15 | Whitelist allowed model names in `/ask` and `/plan` request validation |
-| P4 | RR-10 | Add cert expiry monitoring; document rotation procedure |
+| Priority | Risk | Action | Status |
+|----------|------|--------|--------|
+| ~~P1~~ | ~~RR-1~~ | ~~Remove `tls_insecure_skip_verify`; provision host nginx with CA-signed cert~~ | ✅ Done (2026-03-27) — replaced with domain-locked egress to api.anthropic.com, proxy moved to int_net only |
+| P1 | RR-2 | Add timeout (`context.WithTimeout`) to tester subprocess | Open |
+| P2 | RR-3 | Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml` | Partial — caddy-sidecar + proxy done; 4 remaining |
+| P2 | RR-4 | Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN` | Open |
+| P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` | Open |
+| P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG | Open |
+| P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |
+| P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
+| P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |
+| P3 | RR-9 | Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server` | Partial — caddy-sidecar + proxy done; 4 remaining |
+| P4 | RR-12 | Upgrade Go servers to `tls.VersionTLS13` | Open |
+| P4 | RR-13 | Document test output as a trust boundary; consider output length cap | Open |
+| P4 | RR-14 | Add field length limits to plan creation; consider human review gate | Open |
+| P4 | RR-15 | Whitelist allowed model names in `/ask` and `/plan` request validation | Open |
+| P4 | RR-10 | Add cert expiry monitoring; document rotation procedure | Open |
