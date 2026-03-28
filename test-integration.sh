@@ -342,6 +342,44 @@ else
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking claude-server resource limits..."
+CLAUDE_MEM=$(docker inspect claude-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+CLAUDE_CPUS=$(docker inspect claude-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+CLAUDE_PIDS=$(docker inspect claude-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+CLAUDE_CAPS=$(docker inspect claude-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+RESOURCE_FAIL=0
+# mem_limit: 4g = 4294967296 bytes
+if [ "$CLAUDE_MEM" = "4294967296" ]; then
+  echo "  ✅ claude-server mem_limit: 4g"
+else
+  echo "  ❌ claude-server mem_limit wrong (got $CLAUDE_MEM, want 4294967296)"
+  RESOURCE_FAIL=1
+fi
+# cpus: 2.0 = 2000000000 NanoCPUs
+if [ "$CLAUDE_CPUS" = "2000000000" ]; then
+  echo "  ✅ claude-server cpus: 2.0"
+else
+  echo "  ❌ claude-server cpus wrong (got $CLAUDE_CPUS, want 2000000000)"
+  RESOURCE_FAIL=1
+fi
+if [ "$CLAUDE_PIDS" = "200" ]; then
+  echo "  ✅ claude-server pids_limit: 200"
+else
+  echo "  ❌ claude-server pids_limit wrong (got $CLAUDE_PIDS, want 200)"
+  RESOURCE_FAIL=1
+fi
+if echo "$CLAUDE_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ claude-server cap_drop: ALL"
+else
+  echo "  ❌ claude-server cap_drop missing ALL (got $CLAUDE_CAPS)"
+  RESOURCE_FAIL=1
+fi
+if [ "$RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down 2>/dev/null)
 

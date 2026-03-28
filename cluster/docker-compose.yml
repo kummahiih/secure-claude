@@ -98,6 +98,11 @@ services:
       - plan-server
       - tester-server
       - proxy
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 200
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   mcp-server:
