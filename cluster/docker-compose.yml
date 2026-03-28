@@ -54,8 +54,8 @@ services:
       - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
       - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - NO_PROXY=localhost,127.0.0.1,mcp-server,claude-server
-      - HTTP_PROXY=""
-      - HTTPS_PROXY=""
+      - HTTP_PROXY=http://caddy-sidecar:8081
+      - HTTPS_PROXY=http://caddy-sidecar:8081
 
     volumes:
       - ./proxy/proxy_config.yaml:/tmp/config.yaml:ro
