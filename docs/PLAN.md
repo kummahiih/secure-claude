@@ -97,8 +97,13 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   Done (2026-03-28). All six containers have `mem_limit`, `cpus`, and `pids_limit`.
   Per-container sizing rationale in `HARDENING.md`. Tester subprocess `ulimit`
   remains open (tracked separately).
-- [ ] **RR-4** Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from
-  `MCP_API_TOKEN` to limit blast radius of a single token compromise.
+- [X] **RR-4** ~~Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from
+  `MCP_API_TOKEN` to limit blast radius of a single token compromise.~~
+  Done (2026-03-28). Each service now has its own token: MCP_API_TOKEN for
+  mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server.
+  claude-server holds all three. run.sh generates all three tokens; docker-compose.yml
+  routes each token only to its intended container; verify_isolation.py enforces
+  per-service token boundaries.
 - [ ] **RR-5** Remove or reduce the `FILE_SUCCESS` full-content log line in
   `fileserver/main.go` (replace with length/hash summary).
 - [ ] **RR-11** Redact known secret patterns from `server.py` log output; move
@@ -159,7 +164,7 @@ Repo-specific tasks: [agent PLAN.md](../cluster/agent/docs/PLAN.md),
 - `git_push` / GitHub integration (requires credential isolation design)
 - CI/CD pipeline for parent repo
 - Multi-agent orchestration (review agent checking coding agent)
-- Separate PLAN_API_TOKEN / TESTER_API_TOKEN (tracked as RR-4 in Phase 5)
+
 
 ---
 

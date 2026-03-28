@@ -13,7 +13,9 @@
 | `ANTHROPIC_API_KEY` | Critical — billing/abuse if leaked | High — must not be altered | Medium | `proxy` container only (int_net, no direct internet), host `.secrets.env` |
 | `DYNAMIC_AGENT_KEY` | High — grants API access via proxy | High | High | `claude-server`, `proxy` |
 | `CLAUDE_API_TOKEN` | High — gates external agent invocation | High | High | `claude-server` only |
-| `MCP_API_TOKEN` | High — shared internal service auth | High | High | `claude-server`, `mcp-server`, `plan-server`, `tester-server` |
+| `MCP_API_TOKEN` | High — mcp-server auth | High | High | `claude-server`, `mcp-server` |
+| `PLAN_API_TOKEN` | High — plan-server auth | High | High | `claude-server`, `plan-server` |
+| `TESTER_API_TOKEN` | High — tester-server auth | High | High | `claude-server`, `tester-server` |
 | TLS CA key (`ca.key`) | Critical — can sign arbitrary certs | Critical | Low (used only at build) | Host `cluster/certs/ca.key` (640 perms) |
 | TLS leaf certs/keys | High — MITM if stolen | High | Medium | Per-container `/app/certs/` |
 | `/workspace` source code | Medium — may contain business logic | Critical — agent commits changes | High | Host bind mount → `mcp-server` (rw), others (ro) |
@@ -74,7 +76,9 @@
 |----------|----------------------|
 | Internet → Caddy | TLS 1.3 + bearer token (CLAUDE_API_TOKEN), constant-time compare |
 | Caddy → claude-server | Internal CA mTLS; Caddy verifies `ca.crt` |
-| claude-server → MCP servers | Bearer MCP_API_TOKEN, TLS + internal CA, `VERIFY=/app/certs/ca.crt` |
+| claude-server → mcp-server | Bearer MCP_API_TOKEN, TLS + internal CA, `VERIFY=/app/certs/ca.crt` |
+| claude-server → plan-server | Bearer PLAN_API_TOKEN, TLS + internal CA, `VERIFY=/app/certs/ca.crt` |
+| claude-server → tester-server | Bearer TESTER_API_TOKEN, TLS + internal CA, `VERIFY=/app/certs/ca.crt` |
 | MCP stdio → Go/REST backends | mcp-watchdog intercepts all JSON-RPC before forwarding |
 | Agent subprocess → filesystem | `/workspace` mounted ro in claude-server; writes only via mcp-server's os.OpenRoot jail |
 | claude-server → Anthropic | DYNAMIC_AGENT_KEY only (not real key); route via proxy (int_net only) → caddy-sidecar:8081 → api.anthropic.com |
@@ -175,8 +179,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Attack:** The agent is instructed (via prompt injection) to read `os.environ` values (which it cannot directly) or to call `grep_files` with a pattern targeting known secret markers in code (e.g., `grep_files("ANTHROPIC_API_KEY")`) and then write results to a file or embed them in a commit message.
 - **Specific risk:** `claude-server/server.py` logs `result.stdout` at INFO level (line 107-111), which includes the full Claude Code conversation output. If the agent echoes a secret in its response text, it appears in server logs.
 - **Exfiltration channel:** Agent writes content to `/workspace` via `write_file` or `append_file`; this content is later accessible via git (committed to history) or directly from the host mount. Network exfiltration is blocked — proxy is int_net only and egress is locked to `api.anthropic.com` (though covert-channel encoding in API request bodies remains a theoretical risk).
-- **Token available in subprocess env:** `MCP_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `CLAUDE_API_TOKEN`, `MCP_SERVER_URL`, `PLAN_SERVER_URL`, `TESTER_SERVER_URL` are all in `os.environ` of the Claude Code subprocess (passed via `env={**os.environ, ...}` in `server.py`).
-- **Impact:** Compromise of MCP_API_TOKEN allows direct access to all internal services. DYNAMIC_AGENT_KEY compromise allows unbounded API spend via the proxy.
+- **Token available in subprocess env:** `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `CLAUDE_API_TOKEN`, `MCP_SERVER_URL`, `PLAN_SERVER_URL`, `TESTER_SERVER_URL` are all in `os.environ` of the Claude Code subprocess (passed via `env={**os.environ, ...}` in `server.py`).
+- **Impact:** Compromise of a service token allows direct access to that specific backend (mcp-server, plan-server, or tester-server respectively — no longer all three from one token). DYNAMIC_AGENT_KEY compromise allows unbounded API spend via the proxy.
 
 #### Recursive Self-Modification
 - **Attack:** Agent uses `write_file` or `replace_in_file` (via `mcp-server`) to modify its own Python source files — `server.py`, `files_mcp.py`, `git_mcp.py`, etc. — since the Go fileserver's `os.OpenRoot` jail applies to `/workspace` only, not to `/app/` in `claude-server`.
@@ -198,9 +202,9 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Gap:** No per-session or per-request nonce; stolen token valid until `run.sh` is re-run.
 
 #### Privilege Escalation Between Token Scopes
-- **Attack:** `MCP_API_TOKEN` is shared between `mcp-server`, `plan-server`, and `tester-server`. An attacker who obtains `MCP_API_TOKEN` can access all three services — file read/write, plan manipulation, and test execution — with a single token.
-- **Impact:** Compromise of one MCP service endpoint's token gives access to all others. There is no separate `TESTER_API_TOKEN` or `PLAN_API_TOKEN`.
-- **Note from PLAN.md:** Separate `PLAN_API_TOKEN` is explicitly listed as out-of-scope.
+- **Attack:** An attacker who obtains one internal service token attempts to access other internal services.
+- **Mitigation (RR-4, resolved 2026-03-28):** Each backend now has its own token — `MCP_API_TOKEN` for mcp-server, `PLAN_API_TOKEN` for plan-server, `TESTER_API_TOKEN` for tester-server. Compromise of one token no longer grants access to the other services.
+- **Residual risk:** `claude-server` holds all three tokens in its process environment (passed via `env={**os.environ, ...}` to the Claude Code subprocess). A token exfiltration from the claude-server subprocess still exposes all three — but blast radius per token is now bounded to a single backend service.
 
 #### Bypass of MCP_API_TOKEN Validation
 - **Attack (length bypass):** `verifyToken` in `fileserver/main.go` and `tester/main.go` returns false if `len(expectedBytes) != len(providedBytes)`. This is correct constant-time comparison but means an empty `MCP_API_TOKEN` env var (zero-length) could be bypassed by sending an empty bearer token. 
@@ -304,11 +308,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Status:** All six containers now have `mem_limit`, `cpus`, and `pids_limit`. Caddy-sidecar and proxy were done 2026-03-27; claude-server, mcp-server, plan-server, and tester-server completed 2026-03-28. See `HARDENING.md` for per-container sizing rationale.
 - **Remaining recommendation:** Add `ulimit` to the test subprocess in `tester/main.go` to bound memory within the tester container itself (tracked as a separate open item).
 
-### RR-4: Shared MCP_API_TOKEN Across Three Services
-- **Severity:** Medium  
-- **Likelihood:** Low  
-- **Description:** `mcp-server`, `plan-server`, and `tester-server` all share the same `MCP_API_TOKEN`. Compromise of any one token (e.g., via logging, env leak from a child process) grants access to all three. An attacker with `MCP_API_TOKEN` can read/write arbitrary workspace files, manipulate the active plan, and trigger test execution. Separate tokens per service would limit blast radius.
-- **Recommendation:** Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` as separate tokens. Update `run.sh` to generate them and `docker-compose.yml` to distribute them.
+### ~~RR-4: Shared MCP_API_TOKEN Across Three Services~~ — RESOLVED (2026-03-28)
+- **Status:** Fixed. Each backend service now has its own token: `MCP_API_TOKEN` for mcp-server, `PLAN_API_TOKEN` for plan-server, `TESTER_API_TOKEN` for tester-server. `run.sh` generates all three; `docker-compose.yml` routes each token only to its intended containers; `verify_isolation.py` and service entrypoints enforce the boundaries (forbidden-var checks). Compromise of one service token no longer grants access to the other two backends.
 
 ### RR-5: File Content Logged in Plaintext (mcp-server)
 - **Severity:** Medium  
@@ -383,10 +384,10 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **claude-server** | — | Prompt injection via workspace (§4.2) | Full stdout logging (RR-11) | Env vars in subprocess scope (§4.1); log leakage (RR-11) | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
-| **mcp-server (Go)** | Token shared with 2 other services (RR-4) | — | File content fully logged (RR-5) | File content in logs (RR-5) | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
+| **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | File content fully logged (RR-5) | File content in logs (RR-5) | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
-| **plan-server** | Shared MCP_API_TOKEN (RR-4) | Plan content injection (RR-14) | — | — | — | cap_drop: ALL ✓ |
-| **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; ~~no resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
+| **plan-server** | ~~Shared MCP_API_TOKEN (RR-4)~~ fixed | Plan content injection (RR-14) | — | — | — | cap_drop: ALL ✓ |
+| **tester-server** | ~~Shared MCP_API_TOKEN (RR-4)~~ fixed | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; ~~no resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory (egress locked to api.anthropic.com) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
 
@@ -418,7 +419,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P1~~ | ~~RR-1~~ | ~~Remove `tls_insecure_skip_verify`; provision host nginx with CA-signed cert~~ | ✅ Done (2026-03-27) — replaced with domain-locked egress to api.anthropic.com, proxy moved to int_net only |
 | ~~P1~~ | ~~RR-2~~ | ~~Add timeout (`context.WithTimeout`) to tester subprocess~~ | ✅ Done (2026-03-27) — 300s default via `context.WithTimeout` + `cmd.WaitDelay`; configurable via `TEST_TIMEOUT` env var |
 | ~~P2~~ | ~~RR-3~~ | ~~Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml`~~ | ✅ Done (2026-03-28) — all containers have mem_limit, cpus, pids_limit; tester ulimit still open |
-| P2 | RR-4 | Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN` | Open |
+| ~~P2~~ | ~~RR-4~~ | ~~Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN`~~ | ✅ Done (2026-03-28) — per-service tokens for mcp-server, plan-server, tester-server |
 | P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` | Open |
 | P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG | Open |
 | P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |

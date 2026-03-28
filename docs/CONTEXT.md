@@ -123,7 +123,7 @@ Enforce boundaries structurally, never by filtering.
 7. Git history protection — baseline commit floor at container startup
 8. Plan isolation — plan-server has no access to /workspace, /gitdir, or secrets
 9. Test isolation — tester-server has /workspace read-only, no access to /gitdir, /plans, or secrets
-10. Dual auth — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
+10. Per-service auth — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server; each token scoped to its own backend (see RR-4, resolved 2026-03-28)
 11. TLS everywhere — internal CA, all service-to-service over HTTPS
 12. Startup isolation checks — every container validates before serving
 13. MCP config as build artifact — .mcp.json baked into image
@@ -136,7 +136,9 @@ Enforce boundaries structurally, never by filtering.
 | ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✓ required | ✓ required | ✗ forbidden |
+| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
 
 ---
 
