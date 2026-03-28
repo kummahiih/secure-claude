@@ -341,11 +341,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Description:** All service certs are valid for 365 days, signed at image build time. The CA is 10 years. There is no automated cert rotation — expired certs will silently break internal TLS. The CA key (`cluster/certs/ca.key`) persists on disk between `run.sh` invocations (only generated if not present).
 - **Recommendation:** Add expiry monitoring. Rotate CA on periodic schedule. Consider shorter cert lifetimes (90 days) with automated renewal.
 
-### RR-11: Claude Code Subprocess Stdout/Stderr Logged Fully
-- **Severity:** Medium  
-- **Likelihood:** High  
-- **Description:** `server.py` lines 107-110 log `result.stdout`, `result.stderr`, and full `result` at INFO level. The full Claude Code conversation (including all tool call arguments and responses, agent reasoning, and potentially echoed secrets) is written to Docker container logs. If the agent is tricked into including `MCP_API_TOKEN` or `DYNAMIC_AGENT_KEY` in its response text, those values appear in logs.
-- **Recommendation:** Redact known secret patterns from logs. Avoid logging full conversation transcripts at INFO in production. Use `DEBUG` level for full stdout with log filtering.
+### ~~RR-11: Claude Code Subprocess Stdout/Stderr Logged Fully~~ — RESOLVED (2026-03-28)
+- **Status:** Fixed. `server.py` now moves `result.stdout` and `result.stderr` logging to `DEBUG` level. All log lines that include subprocess output pass through `_redact_secrets()`, which replaces any known token value (`CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`) with `[REDACTED]` using a pre-compiled regex. The log level is configurable at runtime via the `LOG_LEVEL` environment variable (default: `INFO`), so DEBUG output is suppressed in production but available for troubleshooting. Unit tests for `_redact_secrets` cover: known token redaction, multiple tokens in one string, non-string passthrough, and no-token-configured passthrough.
 
 ### RR-12: TLS Minimum Version TLS 1.2 on Internal Go Servers
 - **Severity:** Low  
@@ -378,7 +375,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
 | **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 fixed) | No request audit log | ~~Egress MITM~~ (RR-1 fixed) | No rate limit (RR-8) | — |
-| **claude-server** | — | Prompt injection via workspace (§4.2) | Full stdout logging (RR-11) | Env vars in subprocess scope (§4.1); log leakage (RR-11) | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
+| **claude-server** | — | Prompt injection via workspace (§4.2) | ~~Full stdout logging (RR-11)~~ fixed | Env vars in subprocess scope (§4.1); ~~log leakage (RR-11)~~ fixed | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
 | **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | ~~File content fully logged (RR-5)~~ fixed | ~~File content in logs (RR-5)~~ fixed | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
@@ -418,7 +415,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P2~~ | ~~RR-3~~ | ~~Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml`~~ | ✅ Done (2026-03-28) — all containers have mem_limit, cpus, pids_limit; tester ulimit still open |
 | ~~P2~~ | ~~RR-4~~ | ~~Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN`~~ | ✅ Done (2026-03-28) — per-service tokens for mcp-server, plan-server, tester-server |
 | ~~P2~~ | ~~RR-5~~ | ~~Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go`~~ | ✅ Done (2026-03-28) — replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`; regression test added |
-| P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG | Open |
+| ~~P2~~ | ~~RR-11~~ | ~~Redact secrets from `server.py` log output; move full stdout to DEBUG~~ | ✅ Done (2026-03-28) — `_redact_secrets()` covers all known tokens; stdout/stderr at DEBUG; `LOG_LEVEL` env var configurable |
 | P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |
 | P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
 | P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |

@@ -108,8 +108,11 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   `fileserver/main.go` (replace with length/hash summary).~~
   Done (2026-03-28). Replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`;
   regression test `TestReadContentNotLogged` added to `mcp_test.go`.
-- [ ] **RR-11** Redact known secret patterns from `server.py` log output; move
-  full Claude Code stdout/stderr to `DEBUG` level.
+- [X] **RR-11** ~~Redact known secret patterns from `server.py` log output; move
+  full Claude Code stdout/stderr to `DEBUG` level.~~
+  Done (2026-03-28). `_redact_secrets()` redacts all known tokens; stdout/stderr
+  moved to DEBUG; `LOG_LEVEL` env var added to `setuplogging.py` (default INFO).
+  Unit tests for `_redact_secrets` added to `test_server.py`.
 
 ### P3 — Medium
 
