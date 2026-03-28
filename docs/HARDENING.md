@@ -237,16 +237,82 @@ To restore direct proxy internet access (e.g., for debugging):
 
 ## claude-server
 
-*Hardening TBD.*
+### Applied hardening (docker-compose.yml)
+
+| Directive | Value | Purpose |
+|:---|:---|:---|
+| `cap_drop` | `ALL` | Drop all Linux capabilities |
+| `mem_limit` | `4g` | Bound memory; Claude Code subprocess + Node.js runtime + 5 MCP stdio servers justify higher limit |
+| `cpus` | `2.0` | Cap CPU to prevent runaway subprocess saturation |
+| `pids_limit` | `200` | Fork bomb prevention; allows Claude Code + MCP child processes |
+
+### Sizing rationale
+
+claude-server runs the Claude Code CLI, which spawns a Node.js process plus up to 5 MCP server subprocesses (fileserver, git, docs, planner, tester) over stdio. Each MCP server is an independent process. 4 GB RAM and 2 CPUs are the minimum comfortable headroom for this workload; lower limits risk OOM-killing mid-task.
+
+### Not applied / deferred
+
+| Directive | Reason |
+|:---|:---|
+| `no-new-privileges:true` | Kernel 6.17.0-19 does not support it (see Host Environment Constraints) |
+| `read_only: true` | claude-server writes to `~/.claude/` (session state, credentials) and `/tmp`; making root read-only would require enumerating every writable path and mounting tmpfs entries for each — deferred |
+
+---
 
 ## mcp-server
 
-*Hardening TBD.*
+### Applied hardening (docker-compose.yml)
+
+| Directive | Value | Purpose |
+|:---|:---|:---|
+| `cap_drop` | `ALL` | Drop all Linux capabilities |
+| `mem_limit` | `512m` | Bound memory; Go binary is lightweight, 512 MB is generous headroom |
+| `cpus` | `1.0` | Cap CPU; file I/O workload is not CPU-intensive |
+| `pids_limit` | `100` | Fork bomb prevention; single Go server, no subprocess spawning expected |
+
+### Not applied / deferred
+
+| Directive | Reason |
+|:---|:---|
+| `no-new-privileges:true` | Kernel 6.17.0-19 does not support it (see Host Environment Constraints) |
+| `read_only: true` | `/workspace` is mounted read-write; making root read-only deferred until all write paths are audited |
+
+---
 
 ## plan-server
 
-*Hardening TBD.*
+### Applied hardening (docker-compose.yml)
+
+| Directive | Value | Purpose |
+|:---|:---|:---|
+| `cap_drop` | `ALL` | Drop all Linux capabilities |
+| `mem_limit` | `256m` | Bound memory; minimal Python REST server, smallest memory footprint in the cluster |
+| `cpus` | `0.5` | Cap CPU; lightweight request handler, no heavy computation |
+| `pids_limit` | `50` | Fork bomb prevention; single-process Python server |
+
+### Not applied / deferred
+
+| Directive | Reason |
+|:---|:---|
+| `no-new-privileges:true` | Kernel 6.17.0-19 does not support it (see Host Environment Constraints) |
+| `read_only: true` | `/plans` is mounted read-write for plan state persistence; deferred until write paths are mapped to tmpfs entries |
+
+---
 
 ## tester-server
 
-*Hardening TBD.*
+### Applied hardening (docker-compose.yml)
+
+| Directive | Value | Purpose |
+|:---|:---|:---|
+| `cap_drop` | `ALL` | Drop all Linux capabilities |
+| `mem_limit` | `1g` | Bound memory; runs arbitrary `test.sh` which may compile Go code — 1 GB accommodates Go test compilation |
+| `cpus` | `1.0` | Cap CPU for test runs |
+| `pids_limit` | `150` | Fork bomb prevention; test subprocess may spawn compiler + linker child processes |
+
+### Not applied / deferred
+
+| Directive | Reason |
+|:---|:---|
+| `no-new-privileges:true` | Kernel 6.17.0-19 does not support it (see Host Environment Constraints) |
+| `read_only: true` | Test subprocess needs `/tmp` for compilation artifacts and test scratch space; deferred |
