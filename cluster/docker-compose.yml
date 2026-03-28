@@ -120,6 +120,11 @@ services:
       - /workspace/.git:ro,size=0  # Shadow .git — structural hook prevention
     networks:
       - int_net
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   plan-server:

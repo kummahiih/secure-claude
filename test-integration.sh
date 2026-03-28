@@ -380,6 +380,44 @@ if [ "$RESOURCE_FAIL" -eq 1 ]; then
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking mcp-server resource limits..."
+MCP_MEM=$(docker inspect mcp-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+MCP_CPUS=$(docker inspect mcp-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+MCP_PIDS=$(docker inspect mcp-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+MCP_CAPS=$(docker inspect mcp-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+MCP_RESOURCE_FAIL=0
+# mem_limit: 512m = 536870912 bytes
+if [ "$MCP_MEM" = "536870912" ]; then
+  echo "  ✅ mcp-server mem_limit: 512m"
+else
+  echo "  ❌ mcp-server mem_limit wrong (got $MCP_MEM, want 536870912)"
+  MCP_RESOURCE_FAIL=1
+fi
+# cpus: 1.0 = 1000000000 NanoCPUs
+if [ "$MCP_CPUS" = "1000000000" ]; then
+  echo "  ✅ mcp-server cpus: 1.0"
+else
+  echo "  ❌ mcp-server cpus wrong (got $MCP_CPUS, want 1000000000)"
+  MCP_RESOURCE_FAIL=1
+fi
+if [ "$MCP_PIDS" = "100" ]; then
+  echo "  ✅ mcp-server pids_limit: 100"
+else
+  echo "  ❌ mcp-server pids_limit wrong (got $MCP_PIDS, want 100)"
+  MCP_RESOURCE_FAIL=1
+fi
+if echo "$MCP_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ mcp-server cap_drop: ALL"
+else
+  echo "  ❌ mcp-server cap_drop missing ALL (got $MCP_CAPS)"
+  MCP_RESOURCE_FAIL=1
+fi
+if [ "$MCP_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down 2>/dev/null)
 
