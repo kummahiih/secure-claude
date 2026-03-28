@@ -311,11 +311,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### ~~RR-4: Shared MCP_API_TOKEN Across Three Services~~ — RESOLVED (2026-03-28)
 - **Status:** Fixed. Each backend service now has its own token: `MCP_API_TOKEN` for mcp-server, `PLAN_API_TOKEN` for plan-server, `TESTER_API_TOKEN` for tester-server. `run.sh` generates all three; `docker-compose.yml` routes each token only to its intended containers; `verify_isolation.py` and service entrypoints enforce the boundaries (forbidden-var checks). Compromise of one service token no longer grants access to the other two backends.
 
-### RR-5: File Content Logged in Plaintext (mcp-server)
-- **Severity:** Medium  
-- **Likelihood:** High (happens on every file read)  
-- **Description:** `fileserver/main.go` line 63: `log.Printf("FILE_SUCCESS: Sending raw content: %s", string(data))` logs the full content of every file read through the fileserver to container stdout. If `/workspace` contains secrets (e.g., a `.env` file that slipped through the `.env` scan, or a file with embedded credentials), they appear in Docker logs accessible to anyone with `docker logs mcp-server`. There is no log redaction.
-- **Recommendation:** Remove the `FILE_SUCCESS` log line, or replace it with a content length/hash summary. Apply a similar review to `FILE_WRITTEN` which logs path and byte count (currently safe, but pattern should be audited).
+### ~~RR-5: File Content Logged in Plaintext (mcp-server)~~ — RESOLVED (2026-03-28)
+- **Status:** Fixed. The `FILE_SUCCESS` log line that emitted full file content has been replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)` — only path, byte count, and SHA-256 hash are logged. No file content is written to logs. A regression test (`TestReadContentNotLogged` in `mcp_test.go`) asserts that the sentinel string never appears in log output on every read.
 
 ### RR-6: URL Path Parameter Not URL-Encoded in files_mcp.py
 - **Severity:** Low  
@@ -384,7 +381,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **claude-server** | — | Prompt injection via workspace (§4.2) | Full stdout logging (RR-11) | Env vars in subprocess scope (§4.1); log leakage (RR-11) | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
-| **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | File content fully logged (RR-5) | File content in logs (RR-5) | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
+| **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | ~~File content fully logged (RR-5)~~ fixed | ~~File content in logs (RR-5)~~ fixed | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
 | **plan-server** | ~~Shared MCP_API_TOKEN (RR-4)~~ fixed | Plan content injection (RR-14) | — | — | — | cap_drop: ALL ✓ |
 | **tester-server** | ~~Shared MCP_API_TOKEN (RR-4)~~ fixed | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; ~~no resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
@@ -420,7 +417,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P1~~ | ~~RR-2~~ | ~~Add timeout (`context.WithTimeout`) to tester subprocess~~ | ✅ Done (2026-03-27) — 300s default via `context.WithTimeout` + `cmd.WaitDelay`; configurable via `TEST_TIMEOUT` env var |
 | ~~P2~~ | ~~RR-3~~ | ~~Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml`~~ | ✅ Done (2026-03-28) — all containers have mem_limit, cpus, pids_limit; tester ulimit still open |
 | ~~P2~~ | ~~RR-4~~ | ~~Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN`~~ | ✅ Done (2026-03-28) — per-service tokens for mcp-server, plan-server, tester-server |
-| P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` | Open |
+| ~~P2~~ | ~~RR-5~~ | ~~Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go`~~ | ✅ Done (2026-03-28) — replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`; regression test added |
 | P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG | Open |
 | P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |
 | P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
