@@ -1030,7 +1030,7 @@ Node.js at build time).
 - `verify_isolation.py` logs each check violation to stderr before exiting
 - `server.py` logs query text, stdout/stderr/returncode of each Claude Code subprocess invocation
   (NOTE: this includes the full model response in logs — no current output sanitization)
-- `main.go` (fileserver) logs `FILE_SUCCESS`, `FILE_WRITTEN`, `FILE_REMOVED`, etc. per operation
+- `main.go` (fileserver) logs `FILE_READ` (path + size + SHA-256, no content), `FILE_WRITTEN`, `FILE_REMOVED`, etc. per operation
 - `mcp-watchdog --verbose` logs all JSON-RPC messages intercepted
 - No structured log aggregation currently; logs available via `docker logs <container>`
 - **Gap:** Claude Code subprocess stdout (model output) is logged verbatim in `server.py` —
