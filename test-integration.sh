@@ -418,6 +418,44 @@ if [ "$MCP_RESOURCE_FAIL" -eq 1 ]; then
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking plan-server resource limits..."
+PLAN_MEM=$(docker inspect plan-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+PLAN_CPUS=$(docker inspect plan-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+PLAN_PIDS=$(docker inspect plan-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+PLAN_CAPS=$(docker inspect plan-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+PLAN_RESOURCE_FAIL=0
+# mem_limit: 256m = 268435456 bytes
+if [ "$PLAN_MEM" = "268435456" ]; then
+  echo "  ✅ plan-server mem_limit: 256m"
+else
+  echo "  ❌ plan-server mem_limit wrong (got $PLAN_MEM, want 268435456)"
+  PLAN_RESOURCE_FAIL=1
+fi
+# cpus: 0.5 = 500000000 NanoCPUs
+if [ "$PLAN_CPUS" = "500000000" ]; then
+  echo "  ✅ plan-server cpus: 0.5"
+else
+  echo "  ❌ plan-server cpus wrong (got $PLAN_CPUS, want 500000000)"
+  PLAN_RESOURCE_FAIL=1
+fi
+if [ "$PLAN_PIDS" = "50" ]; then
+  echo "  ✅ plan-server pids_limit: 50"
+else
+  echo "  ❌ plan-server pids_limit wrong (got $PLAN_PIDS, want 50)"
+  PLAN_RESOURCE_FAIL=1
+fi
+if echo "$PLAN_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ plan-server cap_drop: ALL"
+else
+  echo "  ❌ plan-server cap_drop missing ALL (got $PLAN_CAPS)"
+  PLAN_RESOURCE_FAIL=1
+fi
+if [ "$PLAN_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down 2>/dev/null)
 
