@@ -92,11 +92,11 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
 
 ### P2 — High
 
-- [ ] **RR-3** Add `mem_limit`, `cpus`, and `pids_limit` to all containers in
-  `docker-compose.yml`; add `ulimit` to the test subprocess in `tester/main.go`.
-  *Partial (2026-03-27):* `caddy-sidecar` has `pids_limit: 100`, `read_only`,
-  sized `tmpfs`. `proxy` has `pids_limit: 150`, `read_only`, sized `tmpfs`.
-  Remaining: claude-server, mcp-server, plan-server, tester-server.
+- [X] **RR-3** ~~Add `mem_limit`, `cpus`, and `pids_limit` to all containers in
+  `docker-compose.yml`; add `ulimit` to the test subprocess in `tester/main.go`.~~
+  Done (2026-03-28). All six containers have `mem_limit`, `cpus`, and `pids_limit`.
+  Per-container sizing rationale in `HARDENING.md`. Tester subprocess `ulimit`
+  remains open (tracked separately).
 - [ ] **RR-4** Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from
   `MCP_API_TOKEN` to limit blast radius of a single token compromise.
 - [ ] **RR-5** Remove or reduce the `FILE_SUCCESS` full-content log line in
@@ -112,10 +112,9 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   add `name = os.path.basename(name)` (or reject names containing `/` or `..`).
 - [ ] **RR-8** Add rate limiting or concurrency cap on `/ask` and `/plan`
   endpoints (Caddy rate-limit directive or FastAPI semaphore).
-- [ ] **RR-9** Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`,
-  `plan-server`, and `tester-server` in `docker-compose.yml`.
-  *Partial (2026-03-27):* `caddy-sidecar` and `proxy` now have `cap_drop: ALL`.
-  Remaining: claude-server, mcp-server, plan-server, tester-server.
+- [X] **RR-9** ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`,
+  `plan-server`, and `tester-server` in `docker-compose.yml`.~~
+  Done (2026-03-28). All six containers now have `cap_drop: ALL`.
 
 ### P4 — Low / Polish
 

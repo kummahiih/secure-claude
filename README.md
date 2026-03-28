@@ -70,7 +70,7 @@ Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos docu
 4. **Repo Isolation** — active sub-repo as /workspace; parent repo never visible
 5. **Dual-Layer Auth** — CLAUDE_API_TOKEN for ingress, MCP_API_TOKEN for internal services
 6. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
-7. **Non-Root Containers** — UID 1000, cap_drop: ALL on proxy
+7. **Non-Root Containers** — UID 1000, cap_drop: ALL on all containers; mem_limit + cpus + pids_limit on all containers
 8. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
 9. **Test Isolation** — tester-server runs tests as subprocesses with workspace mounted read-only
 

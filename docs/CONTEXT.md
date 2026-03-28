@@ -127,7 +127,7 @@ Enforce boundaries structurally, never by filtering.
 11. TLS everywhere — internal CA, all service-to-service over HTTPS
 12. Startup isolation checks — every container validates before serving
 13. MCP config as build artifact — .mcp.json baked into image
-14. Non-root containers — UID 1000, cap_drop: ALL on proxy
+14. Non-root containers — UID 1000, cap_drop: ALL on all six containers; mem_limit + cpus + pids_limit on all containers
 
 ### Token isolation matrix:
 
