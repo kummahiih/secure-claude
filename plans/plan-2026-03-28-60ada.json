@@ -1,0 +1,78 @@
+{
+  "id": "plan-20260328-112102",
+  "goal": "Introduce TESTER_API_TOKEN and PLAN_API_TOKEN separate from MCP_API_TOKEN (RR-4) to limit blast radius of a single token compromise. Each service gets its own token: MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server. claude-server holds all three to authenticate to each backend.",
+  "status": "in_progress",
+  "created": "2026-03-28T11:21:02.335082+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add PLAN_API_TOKEN to plan-server and plan_mcp.py",
+      "files": [
+        "cluster/planner/planner/plan_server.py",
+        "cluster/planner/planner/plan_mcp.py"
+      ],
+      "action": "In plan_server.py: read PLAN_API_TOKEN from env (fall back to MCP_API_TOKEN for backward compat during rollout, then remove fallback). Update verify_isolation() to require PLAN_API_TOKEN instead of MCP_API_TOKEN; add MCP_API_TOKEN to the forbidden list. In plan_mcp.py: read PLAN_API_TOKEN from env (os.environ.get('PLAN_API_TOKEN', '')) and use it in the HEADERS dict instead of MCP_API_TOKEN.",
+      "verify": "run_tests passes. Manually confirm plan_server.py reads PLAN_API_TOKEN and plan_mcp.py sends PLAN_API_TOKEN in Bearer header.",
+      "done": "plan-server authenticates with PLAN_API_TOKEN; plan_mcp.py sends PLAN_API_TOKEN.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add TESTER_API_TOKEN to tester-server and tester_mcp.py",
+      "files": [
+        "cluster/tester/main.go",
+        "cluster/tester/entrypoint.sh",
+        "cluster/agent/claude/tester_mcp.py"
+      ],
+      "action": "In tester main.go: change os.Getenv('MCP_API_TOKEN') to os.Getenv('TESTER_API_TOKEN') with log.Fatal if empty. In tester entrypoint.sh: check for TESTER_API_TOKEN instead of MCP_API_TOKEN; add MCP_API_TOKEN to the forbidden-var list. In tester_mcp.py: import TESTER_API_TOKEN from runenv (or read from os.environ) and use it in HEADERS instead of MCP_API_TOKEN.",
+      "verify": "run_tests passes. Confirm tester main.go reads TESTER_API_TOKEN and tester_mcp.py sends TESTER_API_TOKEN.",
+      "done": "tester-server authenticates with TESTER_API_TOKEN; tester_mcp.py sends TESTER_API_TOKEN.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Update run.sh, runenv.py, verify_isolation.py, and docker-compose.yml for new tokens",
+      "files": [
+        "run.sh",
+        "plan.sh",
+        "cluster/agent/claude/runenv.py",
+        "cluster/agent/claude/verify_isolation.py",
+        "docker-compose.yml"
+      ],
+      "action": "In run.sh: generate PLAN_API_TOKEN and TESTER_API_TOKEN alongside MCP_API_TOKEN, write all to .cluster_tokens.env, and pass them into docker-compose. In plan.sh: update secret handling to align with new token structure from .cluster_tokens.env (verify it sources and uses the correct tokens). In runenv.py: read PLAN_API_TOKEN and TESTER_API_TOKEN from env and pass them to the respective MCP wrappers. In verify_isolation.py: add checks that plan-server rejects MCP_API_TOKEN and tester-server rejects MCP_API_TOKEN. In docker-compose.yml: inject PLAN_API_TOKEN into plan-server and TESTER_API_TOKEN into tester-server, stop passing MCP_API_TOKEN to those services.",
+      "verify": "run_tests passes. run.sh --setup-only produces .env and .cluster_tokens.env containing PLAN_API_TOKEN and TESTER_API_TOKEN. docker-compose config shows PLAN_API_TOKEN only on claude-server and plan-server, TESTER_API_TOKEN only on claude-server and tester-server, MCP_API_TOKEN only on claude-server and mcp-server.",
+      "done": "run.sh generates all 3 service tokens. docker-compose.yml routes each token only to its intended containers. runenv.py reads PLAN_API_TOKEN and TESTER_API_TOKEN. verify_isolation.py enforces per-service token boundaries.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update test.sh, test-integration.sh, and unit tests for new token isolation",
+      "files": [
+        "test.sh",
+        "test-integration.sh",
+        "cluster/agent/claude/test_isolation.py",
+        "cluster/agent/claude/test_server.py",
+        "cluster/agent/test.sh",
+        "cluster/planner/planner/plan_server_test.py"
+      ],
+      "action": "1) test.sh (root): add dummy exports for PLAN_API_TOKEN and TESTER_API_TOKEN alongside existing MCP_API_TOKEN dummy (e.g. export PLAN_API_TOKEN=\"${PLAN_API_TOKEN:-dummy-plan-token}\", same pattern for TESTER_API_TOKEN). 2) test-integration.sh: add fake PLAN_API_TOKEN and TESTER_API_TOKEN exports alongside MCP_API_TOKEN. Update isolation checks in section 8/8: verify plan-server env has PLAN_API_TOKEN but NOT MCP_API_TOKEN; verify tester-server env has TESTER_API_TOKEN but NOT MCP_API_TOKEN; add cross-contamination checks (plan-server must not have TESTER_API_TOKEN, tester-server must not have PLAN_API_TOKEN). 3) cluster/agent/test.sh: add dummy PLAN_API_TOKEN and TESTER_API_TOKEN exports. 4) test_isolation.py: update clean_env_claude_server to include PLAN_API_TOKEN and TESTER_API_TOKEN; update forbidden-var checks for proxy/caddy to include the new tokens; add tests verifying plan-server rejects MCP_API_TOKEN and tester-server rejects MCP_API_TOKEN. 5) test_server.py: add PLAN_API_TOKEN and TESTER_API_TOKEN to the env patch dict. 6) plan_server_test.py: update MCP_API_TOKEN references to PLAN_API_TOKEN in env patches.",
+      "verify": "run_tests passes (./test.sh). Manually confirm: test.sh exports dummy PLAN_API_TOKEN and TESTER_API_TOKEN; test-integration.sh exports fake PLAN_API_TOKEN and TESTER_API_TOKEN and checks isolation for both new tokens; test_isolation.py includes new tokens in required/forbidden matrices.",
+      "done": "All unit tests pass with new token dummies. test-integration.sh verifies plan-server has only PLAN_API_TOKEN, tester-server has only TESTER_API_TOKEN, and neither has MCP_API_TOKEN. Cross-contamination checks present for all new tokens.",
+      "status": "completed"
+    },
+    {
+      "id": "t5",
+      "name": "Update documentation (CONTEXT, PLAN, THREAT_MODEL, HARDENING, README, sub-repo docs)",
+      "files": [
+        "docs/CONTEXT.md",
+        "docs/PLAN.md",
+        "docs/THREAT_MODEL.md",
+        "README.md"
+      ],
+      "action": "In CONTEXT.md: (a) Update token isolation matrix to show PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server, all three on claude-server. (b) Update 'Dual auth' security principle description. In PLAN.md: mark RR-4 as done with date and summary. Remove 'Separate PLAN_API_TOKEN / TESTER_API_TOKEN' from Out of Scope. In THREAT_MODEL.md: (a) Update Assets Inventory: add PLAN_API_TOKEN and TESTER_API_TOKEN rows; update MCP_API_TOKEN scope description. (b) Update RR-4 to RESOLVED with date. (c) Update \u00a75 Key boundary properties table. (d) Update \u00a79 priority table to mark RR-4 done. In README.md: update security summary point 5 to mention per-service tokens. Also update cluster/agent/docs/CONTEXT.md, cluster/planner/docs/CONTEXT.md, cluster/tester/docs/CONTEXT.md, and cluster/planner/docs/PLAN.md where they reference MCP_API_TOKEN or PLAN_API_TOKEN.",
+      "verify": "grep docs for 'PLAN_API_TOKEN' and 'TESTER_API_TOKEN' confirms new tokens documented. grep for 'RR-4' confirms marked as resolved.",
+      "done": "All documentation reflects the 3-token model and RR-4 is marked resolved.",
+      "status": "pending"
+    }
+  ]
+}
