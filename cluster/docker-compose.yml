@@ -163,6 +163,11 @@ services:
       - ./workspace:/workspace:ro
     networks:
       - int_net
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 150
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 networks:

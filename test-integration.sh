@@ -456,6 +456,44 @@ if [ "$PLAN_RESOURCE_FAIL" -eq 1 ]; then
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking tester-server resource limits..."
+TESTER_MEM=$(docker inspect tester-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+TESTER_CPUS=$(docker inspect tester-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+TESTER_PIDS=$(docker inspect tester-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+TESTER_CAPS=$(docker inspect tester-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+TESTER_RESOURCE_FAIL=0
+# mem_limit: 1g = 1073741824 bytes
+if [ "$TESTER_MEM" = "1073741824" ]; then
+  echo "  ✅ tester-server mem_limit: 1g"
+else
+  echo "  ❌ tester-server mem_limit wrong (got $TESTER_MEM, want 1073741824)"
+  TESTER_RESOURCE_FAIL=1
+fi
+# cpus: 1.0 = 1000000000 NanoCPUs
+if [ "$TESTER_CPUS" = "1000000000" ]; then
+  echo "  ✅ tester-server cpus: 1.0"
+else
+  echo "  ❌ tester-server cpus wrong (got $TESTER_CPUS, want 1000000000)"
+  TESTER_RESOURCE_FAIL=1
+fi
+if [ "$TESTER_PIDS" = "150" ]; then
+  echo "  ✅ tester-server pids_limit: 150"
+else
+  echo "  ❌ tester-server pids_limit wrong (got $TESTER_PIDS, want 150)"
+  TESTER_RESOURCE_FAIL=1
+fi
+if echo "$TESTER_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ tester-server cap_drop: ALL"
+else
+  echo "  ❌ tester-server cap_drop missing ALL (got $TESTER_CAPS)"
+  TESTER_RESOURCE_FAIL=1
+fi
+if [ "$TESTER_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "[$(date +'%H:%M:%S')] Tearing down integration containers..."
 (cd cluster && docker-compose down 2>/dev/null)
 
