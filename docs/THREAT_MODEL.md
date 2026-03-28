@@ -1,6 +1,6 @@
 # Threat Model: secure-claude
 
-**Date:** 2026-03-26 (updated 2026-03-27)  
+**Date:** 2026-03-26 (updated 2026-03-28)  
 **Scope:** secure-claude cluster — hardened containerised environment for running Claude Code as an autonomous AI agent  
 **Classification:** Internal Engineering Review
 
@@ -109,9 +109,9 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 #### Container Escape
 - **Attack:** Exploit kernel vulnerability, Docker breakout via mounted socket, or privileged container.
-- **Prerequisites:** No Docker socket is mounted. No `--privileged`. UID 1000. `proxy` and `caddy-sidecar` have `cap_drop: ALL` + `read_only: true` + `pids_limit`. `claude-server`, `mcp-server`, `plan-server`, `tester-server` do not yet set `cap_drop`.
+- **Prerequisites:** No Docker socket is mounted. No `--privileged`. UID 1000. All containers have `cap_drop: ALL`. `proxy` and `caddy-sidecar` additionally have `read_only: true`.
 - **Impact:** Host compromise; access to `.secrets.env` and real API key.
-- **Residual risk:** Medium-Low — `cap_drop: ALL` now covers the two internet-facing containers (caddy-sidecar, proxy). Remaining containers still have default Linux capabilities (see RR-9).
+- **Residual risk:** Low — `cap_drop: ALL` now covers all six containers (see RR-9, resolved).
 
 #### Network Segmentation Bypass
 - **Attack:** Compromise `caddy-sidecar` (which sits on both `ext_net` and `int_net`) to pivot to internal services.
@@ -243,7 +243,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - System prompts (`/app/prompts/`) and slash commands (`/home/appuser/.claude/commands/`) are owned by `root:root` with mode `555` (directories) and `444` (files). `verify_isolation.py` checks this at startup (check 9). The agent (UID 1000) cannot modify or create files in these directories.
 
 ### Non-root Containers
-- All containers run as UID 1000. `proxy` and `caddy-sidecar` have `cap_drop: ALL`. Others have `user: "1000:1000"` but no explicit `cap_drop` yet (see RR-9).
+- All containers run as UID 1000. All containers have `cap_drop: ALL` (see RR-9, resolved 2026-03-28). `proxy` and `caddy-sidecar` additionally have `read_only: true`.
 
 ### Read-only Mounts
 - `/workspace` is mounted ro in `claude-server` and `tester-server`. Writes only go through `mcp-server`.
@@ -271,9 +271,13 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **`tls_insecure_skip_verify` removed** — the old general-purpose `:8080` egress proxy (which skipped TLS verification to `host.docker.internal`) has been replaced. The new `:8081` endpoint uses public TLS to `api.anthropic.com`.
 - **Supply-chain exfiltration blocked** — a compromised LiteLLM process cannot reach arbitrary domains; only `api.anthropic.com` is reachable. Documented in `HARDENING.md` with full TeamPCP attack analysis.
 
-### Container Hardening — caddy-sidecar and proxy (added 2026-03-27)
+### Container Hardening (added 2026-03-27, extended 2026-03-28)
 - **caddy-sidecar:** `cap_drop: ALL`, `read_only: true`, `pids_limit: 100`, `tmpfs: /tmp:noexec,nosuid,size=64m`. Dockerfile strips file capabilities from `/usr/bin/caddy` (`setcap -r`) to allow `cap_drop: ALL`.
 - **proxy:** `cap_drop: ALL`, `read_only: true`, `pids_limit: 150`, `tmpfs: /tmp:noexec,nosuid,size=256m`. Blocks filesystem persistence, fork bombs, and binary execution from tmpfs.
+- **claude-server:** `cap_drop: ALL`, `mem_limit: 4g`, `cpus: 2.0`, `pids_limit: 200`. Higher limits to accommodate Claude Code subprocess + 5 MCP stdio servers.
+- **mcp-server:** `cap_drop: ALL`, `mem_limit: 512m`, `cpus: 1.0`, `pids_limit: 100`. Go binary is lightweight; 512 MB is generous headroom.
+- **plan-server:** `cap_drop: ALL`, `mem_limit: 256m`, `cpus: 0.5`, `pids_limit: 50`. Minimal Python REST server, smallest limits in the cluster.
+- **tester-server:** `cap_drop: ALL`, `mem_limit: 1g`, `cpus: 1.0`, `pids_limit: 150`. Accommodates Go test compilation in `test.sh`.
 - **`no-new-privileges` deferred** — kernel 6.17.0-19 does not support it (documented in `HARDENING.md`).
 
 ### CA Certificate Hardening (added 2026-03-27)
@@ -296,11 +300,9 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Status:** Fixed. `tester/main.go` now uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT` env var) with `exec.CommandContext` and `cmd.WaitDelay = 10s`. Timed-out tests return exit code 124 (matching `timeout` command convention). See tester `PLAN.md` for details.
 - **Remaining recommendation:** Add memory caps via `ulimit` or cgroup limits (tracked under RR-3).
 
-### RR-3: No Resource Limits on Containers — PARTIALLY RESOLVED (2026-03-27)
-- **Severity:** Medium  
-- **Likelihood:** Low (requires agent misbehaviour or adversarial workspace)  
-- **Description:** `caddy-sidecar` now has `pids_limit: 100`, `read_only: true`, `tmpfs` with size cap. `proxy` now has `pids_limit: 150`, `read_only: true`, `tmpfs` with size cap. However, `claude-server`, `mcp-server`, `plan-server`, and `tester-server` still have no `mem_limit`, `cpus`, `pids_limit`, or `ulimits`. `tester-server` runs arbitrary code from `/workspace/test.sh` with no resource accounting.
-- **Remaining recommendation:** Add `mem_limit`, `cpus`, `pids_limit` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`. Add `ulimit` to the test subprocess in `tester/main.go`.
+### ~~RR-3: No Resource Limits on Containers~~ — RESOLVED (2026-03-28)
+- **Status:** All six containers now have `mem_limit`, `cpus`, and `pids_limit`. Caddy-sidecar and proxy were done 2026-03-27; claude-server, mcp-server, plan-server, and tester-server completed 2026-03-28. See `HARDENING.md` for per-container sizing rationale.
+- **Remaining recommendation:** Add `ulimit` to the test subprocess in `tester/main.go` to bound memory within the tester container itself (tracked as a separate open item).
 
 ### RR-4: Shared MCP_API_TOKEN Across Three Services
 - **Severity:** Medium  
@@ -332,11 +334,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Description:** No rate limiting is applied at the Caddy or FastAPI layer. An authenticated caller can submit unlimited concurrent requests to `/ask`, each spawning a 600-second `claude` subprocess. This could exhaust host resources (CPU, memory) and run up API costs unboundedly.
 - **Recommendation:** Add a Caddy rate-limit directive or a FastAPI semaphore/queue. Enforce a maximum of N concurrent agent subprocesses.
 
-### RR-9: Missing cap_drop on Most Containers — PARTIALLY RESOLVED (2026-03-27)
-- **Severity:** Low  
-- **Likelihood:** Low  
-- **Description:** `proxy` and `caddy-sidecar` now have `cap_drop: ALL`. `claude-server`, `mcp-server`, `plan-server`, and `tester-server` still run as UID 1000 but retain default Linux capabilities.
-- **Remaining recommendation:** Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, and `tester-server`.
+### ~~RR-9: Missing cap_drop on Most Containers~~ — RESOLVED (2026-03-28)
+- **Status:** All six containers now have `cap_drop: ALL`. Caddy-sidecar and proxy were done 2026-03-27; claude-server, mcp-server, plan-server, and tester-server completed 2026-03-28.
 
 ### RR-10: Cert Validity 365 Days, No Rotation Mechanism
 - **Severity:** Low  
@@ -384,10 +383,10 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **claude-server** | — | Prompt injection via workspace (§4.2) | Full stdout logging (RR-11) | Env vars in subprocess scope (§4.1); log leakage (RR-11) | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
-| **mcp-server (Go)** | Token shared with 2 other services (RR-4) | — | File content fully logged (RR-5) | File content in logs (RR-5) | No resource limits (RR-3) | No cap_drop (RR-9) |
+| **mcp-server (Go)** | Token shared with 2 other services (RR-4) | — | File content fully logged (RR-5) | File content in logs (RR-5) | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
-| **plan-server** | Shared MCP_API_TOKEN (RR-4) | Plan content injection (RR-14) | — | — | — | — |
-| **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; no resource limits (RR-3) | No cap_drop (RR-9) |
+| **plan-server** | Shared MCP_API_TOKEN (RR-4) | Plan content injection (RR-14) | — | — | — | cap_drop: ALL ✓ |
+| **tester-server** | Shared MCP_API_TOKEN (RR-4) | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ fixed; ~~no resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory (egress locked to api.anthropic.com) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
 
@@ -418,14 +417,14 @@ The following controls are notably above baseline for an "AI agent in a containe
 |----------|------|--------|--------|
 | ~~P1~~ | ~~RR-1~~ | ~~Remove `tls_insecure_skip_verify`; provision host nginx with CA-signed cert~~ | ✅ Done (2026-03-27) — replaced with domain-locked egress to api.anthropic.com, proxy moved to int_net only |
 | ~~P1~~ | ~~RR-2~~ | ~~Add timeout (`context.WithTimeout`) to tester subprocess~~ | ✅ Done (2026-03-27) — 300s default via `context.WithTimeout` + `cmd.WaitDelay`; configurable via `TEST_TIMEOUT` env var |
-| P2 | RR-3 | Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml` | Partial — caddy-sidecar + proxy done; 4 remaining |
+| ~~P2~~ | ~~RR-3~~ | ~~Add `mem_limit`, `cpus`, `pids_limit` to all containers in `docker-compose.yml`~~ | ✅ Done (2026-03-28) — all containers have mem_limit, cpus, pids_limit; tester ulimit still open |
 | P2 | RR-4 | Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN` | Open |
 | P2 | RR-5 | Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go` | Open |
 | P2 | RR-11 | Redact secrets from `server.py` log output; move full stdout to DEBUG | Open |
 | P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |
 | P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
 | P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |
-| P3 | RR-9 | Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server` | Partial — caddy-sidecar + proxy done; 4 remaining |
+| ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`~~ | ✅ Done (2026-03-28) — all containers have cap_drop: ALL |
 | P4 | RR-12 | Upgrade Go servers to `tls.VersionTLS13` | Open |
 | P4 | RR-13 | Document test output as a trust boundary; consider output length cap | Open |
 | P4 | RR-14 | Add field length limits to plan creation; consider human review gate | Open |
