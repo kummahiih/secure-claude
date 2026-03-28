@@ -42,7 +42,7 @@ Host / Network
 
 | Service | Description | Isolation checks |
 | :--- | :--- | :--- |
-| caddy-sidecar | TLS termination, external ingress, reverse proxy | caddy_entrypoint.sh |
+| caddy-sidecar | TLS termination, external ingress (:8443) + dedicated egress-only proxy (:8081 → api.anthropic.com:443) | caddy_entrypoint.sh |
 | claude-server | FastAPI + Claude Code CLI subprocess + 5 MCP stdio servers | verify_isolation.py (26 checks) |
 | proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY; int_net only, **no direct external network access** (security decision) — all egress routes through caddy-sidecar:8081 | proxy_wrapper.py (4 checks) |
 | mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
@@ -124,10 +124,13 @@ Enforce boundaries structurally, never by filtering.
 8. Plan isolation — plan-server has no access to /workspace, /gitdir, or secrets
 9. Test isolation — tester-server has /workspace read-only, no access to /gitdir, /plans, or secrets
 10. Per-service auth — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server; each token scoped to its own backend (see RR-4, resolved 2026-03-28)
-11. TLS everywhere — internal CA, all service-to-service over HTTPS
+11. TLS everywhere — internal CA, all service-to-service over HTTPS; egress to Anthropic uses proper public TLS (no `tls_insecure_skip_verify`) via dedicated Caddy `:8081` listener hardcoded to `api.anthropic.com:443`
 12. Startup isolation checks — every container validates before serving
 13. MCP config as build artifact — .mcp.json baked into image
 14. Non-root containers — UID 1000, cap_drop: ALL on all six containers; mem_limit + cpus + pids_limit on all containers
+15. Log sanitization — `server.py` subprocess stdout/stderr demoted to DEBUG level; `_redact_secrets()` replaces all known token values with `[REDACTED]` before any log output; configurable via `LOG_LEVEL` env var
+16. Tester subprocess timeout — `tester/main.go` uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT`) with `cmd.WaitDelay = 10s`; timed-out tests return exit code 124
+17. Structured file-access logging — mcp-server logs `FILE_READ: <path> (<n> bytes, sha256=<hex>)` only; no file content written to logs; regression test asserts content never appears in log output
 
 ### Token isolation matrix:
 
