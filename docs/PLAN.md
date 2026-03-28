@@ -104,8 +104,10 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   claude-server holds all three. run.sh generates all three tokens; docker-compose.yml
   routes each token only to its intended container; verify_isolation.py enforces
   per-service token boundaries.
-- [ ] **RR-5** Remove or reduce the `FILE_SUCCESS` full-content log line in
-  `fileserver/main.go` (replace with length/hash summary).
+- [X] **RR-5** ~~Remove or reduce the `FILE_SUCCESS` full-content log line in
+  `fileserver/main.go` (replace with length/hash summary).~~
+  Done (2026-03-28). Replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`;
+  regression test `TestReadContentNotLogged` added to `mcp_test.go`.
 - [ ] **RR-11** Redact known secret patterns from `server.py` log output; move
   full Claude Code stdout/stderr to `DEBUG` level.
 
