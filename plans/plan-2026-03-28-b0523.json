@@ -1,0 +1,66 @@
+{
+  "id": "plan-20260328-220247",
+  "goal": "Fix RR-11: Redact known secret patterns from server.py log output and move full Claude Code stdout/stderr to DEBUG level. Include unit tests and documentation updates.",
+  "status": "in_progress",
+  "created": "2026-03-28T22:02:47.272502+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add _redact_secrets helper to server.py",
+      "files": [
+        "cluster/agent/claude/server.py"
+      ],
+      "action": "Add a `_redact_secrets(text: str) -> str` function near the top of server.py (after imports, before _expand_slash_command). It should use `re.sub` to replace values matching known secret env var patterns with `[REDACTED]`. Patterns to match: any value of CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN read from the environment at module load time. Build a single compiled regex from `re.escape(value)` for each non-empty token, joined with `|`. If no tokens are found, return text unchanged. Also add `import re` at the top.",
+      "verify": "run_tests passes. Manually inspect that `_redact_secrets` is defined and uses `re.compile` with escaped token values.",
+      "done": "`_redact_secrets` function exists in server.py, accepts a string, returns the string with all known token values replaced by `[REDACTED]`.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Move stdout/stderr logging to DEBUG and apply redaction",
+      "files": [
+        "cluster/agent/claude/server.py"
+      ],
+      "action": "In both `/ask` and `/plan` endpoint handlers, change the four (or three) `logger.info(...)` lines that log `result.stdout`, `result.stderr`, `result.returncode`, and `result` to: (1) `logger.debug(f'stdout: {_redact_secrets(result.stdout)!r}')`, (2) `logger.debug(f'stderr: {_redact_secrets(result.stderr)!r}')`, (3) `logger.debug(f'returncode: {result.returncode}')`. Remove the `logger.info(f'result: {result!r}')` line entirely (it duplicates stdout+stderr+returncode and is hard to redact). Also wrap the `logger.error(f'Claude Code exited with error: {result.stderr}')` lines with `_redact_secrets`. Add a new `logger.info` line in each handler that logs only: `f'Claude Code completed: returncode={result.returncode} stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}'` \u2014 a safe summary at INFO level.",
+      "verify": "run_tests passes. `grep -n 'logger.info.*result.stdout' cluster/agent/claude/server.py` returns no matches. `grep -n 'logger.debug.*_redact_secrets' cluster/agent/claude/server.py` returns matches.",
+      "done": "Full stdout/stderr logged at DEBUG level with redaction; INFO level logs only a safe summary (returncode + byte counts). No raw subprocess output at INFO.",
+      "status": "blocked",
+      "blockers": [
+        "Python tests (115/115) pass. Go tests fail with OS resource exhaustion: \"failed to create new OS thread (have 3 already; errno=11)\" and \"may need to increase max user processes (ulimit -u)\". This is a container-level infrastructure issue unrelated to the Python changes in server.py."
+      ]
+    },
+    {
+      "id": "t3",
+      "name": "Make log level configurable via LOG_LEVEL env var",
+      "files": [
+        "cluster/agent/claude/setuplogging.py"
+      ],
+      "action": "Read `os.environ.get('LOG_LEVEL', 'INFO')` and pass `getattr(logging, level_str.upper(), logging.INFO)` to `logging.basicConfig(level=...)`. Add `import os` at the top. This allows operators to set `LOG_LEVEL=DEBUG` in docker-compose to see full (redacted) output when debugging.",
+      "verify": "run_tests passes. `LOG_LEVEL=DEBUG python -c 'import setuplogging; import logging; assert logging.getLogger().level == logging.DEBUG'` exits 0.",
+      "done": "setuplogging.py reads LOG_LEVEL from environment, defaults to INFO.",
+      "status": "pending"
+    },
+    {
+      "id": "t4",
+      "name": "Add unit tests for _redact_secrets and log-level changes",
+      "files": [
+        "cluster/agent/claude/test_server.py"
+      ],
+      "action": "Add tests to test_server.py (which already mocks runenv): (1) `TestRedactSecrets` class: import `_redact_secrets` from server. Test that each dummy token value ('dummy-token', 'dummy-key', 'dummy-mcp-token', 'dummy-plan-token', 'dummy-tester-token') is replaced with '[REDACTED]' in arbitrary text. Test that text with no secrets is returned unchanged. Test that multiple occurrences in one string are all replaced. (2) `TestLogLevelOnSubprocessOutput` class: using `patch('server.subprocess.run')` and `patch('server.logger')`, call `/ask` with a valid token and assert that `logger.debug` was called (not `logger.info`) for stdout/stderr lines, and that `logger.info` was called with only the safe summary containing 'returncode='. Also add test.sh entry if test_server.py is not already listed (it is \u2014 confirmed).",
+      "verify": "run_tests passes. `cd cluster/agent/claude && python -m pytest test_server.py -v --tb=short` shows all new tests PASSED.",
+      "done": "At least 5 new test cases in test_server.py covering redaction correctness and DEBUG-level logging.",
+      "status": "pending"
+    },
+    {
+      "id": "t5",
+      "name": "Update THREAT_MODEL.md to mark RR-11 resolved",
+      "files": [
+        "docs/THREAT_MODEL.md"
+      ],
+      "action": "In \u00a76 Residual Risks, change `### RR-11: Claude Code Subprocess Stdout/Stderr Logged Fully` to `### ~~RR-11: Claude Code Subprocess Stdout/Stderr Logged Fully~~ \u2014 RESOLVED (2026-03-28)`. Replace the body with a status note: `- **Status:** Fixed. Full Claude Code stdout/stderr moved to DEBUG level with secret redaction. INFO level now logs only a safe summary (returncode + byte counts). A compiled regex built from all known token env vars replaces token values with [REDACTED] before any log emission. setuplogging.py supports LOG_LEVEL env var for operators who need DEBUG output. Regression tests in test_server.py verify redaction and log levels.` Keep Severity/Likelihood for historical reference. In \u00a79 Recommended Mitigations table, change the RR-11 row Status from `Open` to `\u2705 Done (2026-03-28)` and strike through the Priority/Risk columns like the other resolved rows.",
+      "verify": "grep 'RESOLVED.*2026-03-28' docs/THREAT_MODEL.md shows RR-11 line. grep 'RR-11.*Done' docs/THREAT_MODEL.md shows the mitigations table entry.",
+      "done": "RR-11 is marked resolved in both \u00a76 and \u00a79 of THREAT_MODEL.md with accurate description of the fix.",
+      "status": "pending"
+    }
+  ]
+}
