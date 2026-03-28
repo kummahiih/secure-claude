@@ -1,0 +1,53 @@
+{
+  "id": "plan-20260328-223555",
+  "goal": "Fix RR-6: URL-encode path parameters in files_mcp.py using params= kwarg, with tests and documentation updates",
+  "status": "in_progress",
+  "created": "2026-03-28T22:35:55.880008+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Replace string-interpolated query params with params= kwarg in files_mcp.py",
+      "files": [
+        "cluster/agent/claude/files_mcp.py"
+      ],
+      "action": "In _dispatch(), change the 4 endpoints that use f-string query params to use the requests params= kwarg instead:\n\n1. read_workspace_file: change `f\"{MCP_SERVER_URL}/read?path={arguments['file_path']}\"` \u2192 `f\"{MCP_SERVER_URL}/read\", params={\"path\": arguments[\"file_path\"]}`\n2. create_file: change `f\"{MCP_SERVER_URL}/create?path={arguments['path']}\"` \u2192 `f\"{MCP_SERVER_URL}/create\", params={\"path\": arguments[\"path\"]}`\n3. delete_file: change `f\"{MCP_SERVER_URL}/remove?path={arguments['path']}\"` \u2192 `f\"{MCP_SERVER_URL}/remove\", params={\"path\": arguments[\"path\"]}`\n4. create_directory: change `f\"{MCP_SERVER_URL}/mkdir?path={arguments['path']}\"` \u2192 `f\"{MCP_SERVER_URL}/mkdir\", params={\"path\": arguments[\"path\"]}`\n\nThe other endpoints (list_files, write_file, grep_files, replace_in_file, append_file) already use JSON bodies or no query params \u2014 no changes needed.",
+      "verify": "run_tests passes. Visually confirm no f-string query param interpolation remains for path arguments.",
+      "done": "All 4 requests.get/post/delete calls that had ?path= in the URL now use params= kwarg instead.",
+      "status": "current"
+    },
+    {
+      "id": "t2",
+      "name": "Add URL-encoding unit tests for special characters in files_mcp_test.py",
+      "files": [
+        "cluster/agent/claude/files_mcp_test.py"
+      ],
+      "action": "Add 4 new test functions (one per affected endpoint) that verify the params= kwarg is used correctly when paths contain special characters like &, #, ?, and spaces:\n\n1. test_read_file_special_chars_in_path \u2014 call _dispatch('read_workspace_file', {'file_path': 'dir/file&name=foo#bar'}) with mocked requests.get returning 200. Assert mock_get was called with params={'path': 'dir/file&name=foo#bar'} and the URL does NOT contain '?' (i.e., the base URL is clean).\n2. test_create_file_special_chars \u2014 same pattern for create_file with path 'new file&copy.txt'.\n3. test_delete_file_special_chars \u2014 same pattern for delete_file with path 'old?file#1.txt'.\n4. test_create_directory_special_chars \u2014 same pattern for create_directory with path 'dir with spaces&more'.\n\nFor each test, verify the first positional arg to mock is the bare URL (e.g., 'https://mcp-server:8443/read') and kwargs include params= with the correct path value.",
+      "verify": "run_tests passes. All 4 new tests pass and specifically assert params= kwarg usage.",
+      "done": "4 new tests exist in files_mcp_test.py covering special-character paths for read, create, delete, mkdir.",
+      "status": "pending"
+    },
+    {
+      "id": "t3",
+      "name": "Update existing tests that assert URL contains path in files_mcp_test.py",
+      "files": [
+        "cluster/agent/claude/files_mcp_test.py"
+      ],
+      "action": "Review existing tests that check the URL argument (e.g., test_create_file_success asserts `'new.txt' in args[0]`, test_delete_file_success asserts `'old.txt' in args[0]`, test_create_directory_success asserts `'mydir' in args[0]`). These will FAIL after the params= change because the path is no longer in the URL string.\n\nUpdate these tests to instead check kwargs['params'] contains the expected path value. Specifically:\n- test_create_file_success: change `assert 'new.txt' in args[0]` \u2192 `assert kwargs['params'] == {'path': 'new.txt'}`\n- test_delete_file_success: change `assert 'old.txt' in args[0]` \u2192 `assert kwargs['params'] == {'path': 'old.txt'}`\n- test_create_directory_success: change `assert 'mydir' in args[0]` \u2192 `assert kwargs['params'] == {'path': 'mydir'}`",
+      "verify": "run_tests passes. No test asserts path presence in the URL positional arg for the 4 affected endpoints.",
+      "done": "All existing tests updated to verify params= kwarg instead of URL string content.",
+      "status": "pending"
+    },
+    {
+      "id": "t4",
+      "name": "Mark RR-6 as resolved in THREAT_MODEL.md and PLAN.md",
+      "files": [
+        "docs/THREAT_MODEL.md",
+        "docs/PLAN.md"
+      ],
+      "action": "In docs/THREAT_MODEL.md:\n1. Change the RR-6 heading to strikethrough: `### ~~RR-6: URL Path Parameter Not URL-Encoded in files_mcp.py~~ \u2014 RESOLVED (2026-03-28)`\n2. Add **Status:** Fixed line: 'Fixed. All query-parameter-based endpoints in `files_mcp.py` (`/read`, `/create`, `/remove`, `/mkdir`) now use the `params=` kwarg to `requests.get/post/delete` instead of f-string interpolation. The `requests` library handles URL-encoding automatically. Unit tests verify correct encoding of paths containing `&`, `#`, `?`, and spaces.'\n3. Update the \u00a79 table row for RR-6 status from 'Open' to '\u2705 Done (2026-03-28)'\n4. Update the STRIDE table: files_mcp.py Tampering cell \u2014 strikethrough 'URL param injection (RR-6)' and mark fixed.\n\nIn docs/PLAN.md:\n1. Change the RR-6 checkbox from `- [ ]` to `- [X]` and append ' \u2014 Done (2026-03-28). All path query params use `params=` kwarg; special-character tests added.'\n\nDo NOT modify CONTEXT.md or ARCHITECTURE.md \u2014 they don't reference RR-6.",
+      "verify": "grep for 'RR-6' in both files confirms all references show resolved/done status. No 'Open' remains for RR-6.",
+      "done": "RR-6 is marked resolved in both THREAT_MODEL.md and PLAN.md with date and description.",
+      "status": "pending"
+    }
+  ]
+}
