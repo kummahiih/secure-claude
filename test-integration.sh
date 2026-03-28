@@ -25,6 +25,8 @@ bash ./run.sh --setup-only
 
 # Provide completely fake tokens so the SDKs and Docker Compose don't crash on boot
 export MCP_API_TOKEN="integration-test-mcp-token"
+export PLAN_API_TOKEN="integration-test-plan-token"
+export TESTER_API_TOKEN="integration-test-tester-token"
 export CLAUDE_API_TOKEN="integration-test-Claude-token"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
 export DYNAMIC_AGENT_KEY="dummy-dynamic-key"
@@ -290,7 +292,7 @@ else
   exit 1
 fi
 
-FORBIDDEN_VARS_CHECK=$(docker exec plan-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY)' || true)
+FORBIDDEN_VARS_CHECK=$(docker exec plan-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY|MCP_API_TOKEN)' || true)
 if [ -z "$FORBIDDEN_VARS_CHECK" ]; then
   echo "  ✅ plan-server env var isolation clean"
 else
@@ -300,14 +302,50 @@ else
   exit 1
 fi
 
+PLAN_TOKEN_CHECK=$(docker exec plan-server env 2>/dev/null | grep -E '^PLAN_API_TOKEN=' || true)
+if [ -n "$PLAN_TOKEN_CHECK" ]; then
+  echo "  ✅ plan-server has PLAN_API_TOKEN"
+else
+  echo "  ❌ plan-server missing PLAN_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+PLAN_NO_TESTER=$(docker exec plan-server env 2>/dev/null | grep -E '^TESTER_API_TOKEN=' || true)
+if [ -z "$PLAN_NO_TESTER" ]; then
+  echo "  ✅ plan-server does not have TESTER_API_TOKEN (no cross-contamination)"
+else
+  echo "  ❌ plan-server has TESTER_API_TOKEN (cross-contamination)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "$(date +'%H:%M:%S') Tester-server isolation..."
 
-TESTER_VARS_CHECK=$(docker exec tester-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY)' || true)
+TESTER_VARS_CHECK=$(docker exec tester-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY|MCP_API_TOKEN)' || true)
 if [ -z "$TESTER_VARS_CHECK" ]; then
   echo "  ✅ tester-server env var isolation clean"
 else
   echo "  ❌ tester-server has forbidden env vars:"
   echo "$TESTER_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+TESTER_TOKEN_CHECK=$(docker exec tester-server env 2>/dev/null | grep -E '^TESTER_API_TOKEN=' || true)
+if [ -n "$TESTER_TOKEN_CHECK" ]; then
+  echo "  ✅ tester-server has TESTER_API_TOKEN"
+else
+  echo "  ❌ tester-server missing TESTER_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+TESTER_NO_PLAN=$(docker exec tester-server env 2>/dev/null | grep -E '^PLAN_API_TOKEN=' || true)
+if [ -z "$TESTER_NO_PLAN" ]; then
+  echo "  ✅ tester-server does not have PLAN_API_TOKEN (no cross-contamination)"
+else
+  echo "  ❌ tester-server has PLAN_API_TOKEN (cross-contamination)"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi

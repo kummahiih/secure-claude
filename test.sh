@@ -21,6 +21,8 @@ fi
 
 # Provide dummy tokens so the test harnesses don't crash on missing env vars
 export MCP_API_TOKEN="${MCP_API_TOKEN:-dummy-mcp-token}"
+export PLAN_API_TOKEN="${PLAN_API_TOKEN:-dummy-plan-token}"
+export TESTER_API_TOKEN="${TESTER_API_TOKEN:-dummy-tester-token}"
 export CLAUDE_API_TOKEN="${CLAUDE_API_TOKEN:-dummy-claude-token}"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy-anthropic-key}"
 export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-dynamic-key}"
