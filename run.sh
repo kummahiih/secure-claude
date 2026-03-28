@@ -36,13 +36,16 @@ rm -f .env .cluster_tokens.env
 echo "[$(date +'%H:%M:%S')] Generating fresh cluster tokens..."
 export DYNAMIC_AGENT_KEY="sk-$(openssl rand -hex 16)"
 export MCP_API_TOKEN=$(openssl rand -hex 32)
+export PLAN_API_TOKEN=$(openssl rand -hex 32)
+export TESTER_API_TOKEN=$(openssl rand -hex 32)
 export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
 
 # Create the standard .env file for Docker Compose
-# We append the .secrets.env content so Docker Compose has all keys in one place
 {
     echo "DYNAMIC_AGENT_KEY=$DYNAMIC_AGENT_KEY"
     echo "MCP_API_TOKEN=$MCP_API_TOKEN"
+    echo "PLAN_API_TOKEN=$PLAN_API_TOKEN"
+    echo "TESTER_API_TOKEN=$TESTER_API_TOKEN"
     echo "CLAUDE_API_TOKEN=$CLAUDE_API_TOKEN"
 } > .env
 
@@ -50,6 +53,8 @@ export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
 {
     echo "export DYNAMIC_AGENT_KEY=\"$DYNAMIC_AGENT_KEY\""
     echo "export MCP_API_TOKEN=\"$MCP_API_TOKEN\""
+    echo "export PLAN_API_TOKEN=\"$PLAN_API_TOKEN\""
+    echo "export TESTER_API_TOKEN=\"$TESTER_API_TOKEN\""
     echo "export CLAUDE_API_TOKEN=\"$CLAUDE_API_TOKEN\""
 } > .cluster_tokens.env
 

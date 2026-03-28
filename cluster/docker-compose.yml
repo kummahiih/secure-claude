@@ -76,6 +76,8 @@ services:
       - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}      
       - ANTHROPIC_BASE_URL=https://proxy:4000        
       - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - PLAN_API_TOKEN=${PLAN_API_TOKEN}
+      - TESTER_API_TOKEN=${TESTER_API_TOKEN}
       - CLAUDE_API_TOKEN=${CLAUDE_API_TOKEN}
       - MCP_SERVER_URL=https://mcp-server:8443
       - PLAN_SERVER_URL=https://plan-server:8443
@@ -134,7 +136,7 @@ services:
     container_name: plan-server
     user: "1000:1000"
     environment:
-      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - PLAN_API_TOKEN=${PLAN_API_TOKEN}
       - SSL_CERT_FILE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
     volumes:
@@ -157,7 +159,7 @@ services:
     container_name: tester-server
     user: "1000:1000"
     environment:
-      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - TESTER_API_TOKEN=${TESTER_API_TOKEN}
       - SSL_CERT_FILE=/app/certs/ca.crt
     volumes:
       - ./workspace:/workspace:ro
