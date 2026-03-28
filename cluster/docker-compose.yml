@@ -161,6 +161,7 @@ services:
     environment:
       - TESTER_API_TOKEN=${TESTER_API_TOKEN}
       - SSL_CERT_FILE=/app/certs/ca.crt
+      - GOMAXPROCS=1
     volumes:
       - ./workspace:/workspace:ro
     networks:
