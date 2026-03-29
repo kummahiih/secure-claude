@@ -67,12 +67,11 @@ Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos docu
 1. **Credential Isolation** — agent uses ephemeral DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
 2. **Network Isolation** — claude-server and proxy on int_net only; the proxy has no direct external network access (intentional security boundary — outbound Anthropic API calls are routed through the host network stack, never directly from the proxy container)
 3. **Filesystem Jail** — Go os.OpenRoot at /workspace, traversal blocked at runtime level
-4. **Repo Isolation** — active sub-repo as /workspace; parent repo never visible
-5. **Per-Service Auth** — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server — each token scoped to its own backend
-6. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
-7. **Non-Root Containers** — UID 1000, cap_drop: ALL on all containers; mem_limit + cpus + pids_limit on all containers
-8. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
-9. **Test Isolation** — tester-server runs tests as subprocesses with workspace mounted read-only
+4. **Per-Service Auth** — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server — each token scoped to its own backend
+5. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
+6. **Non-Root Containers** — UID 1000, cap_drop: ALL on all containers; mem_limit + cpus + pids_limit on all containers
+7. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
+8. **Test Isolation** — tester-server runs tests as subprocesses with workspace mounted read-only
 
 
 ## Switching the Active Workspace
