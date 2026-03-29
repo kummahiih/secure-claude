@@ -1,0 +1,53 @@
+{
+  "id": "plan-20260329-102439",
+  "goal": "Fix RR-7: Harden slash-command name parsing in server.py to prevent path traversal, add unit tests, and update documentation.",
+  "status": "completed",
+  "created": "2026-03-29T10:24:39.309659+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Harden _expand_slash_command in server.py",
+      "files": [
+        "cluster/agent/claude/server.py"
+      ],
+      "action": "In `_expand_slash_command()`, after `name = query[1:].split()[0]`, add validation: strip directory components with `name = os.path.basename(name)` and reject the name if it is empty or still contains `..` (return the original query with a 400-level log warning). This ensures names like `../../etc/passwd` resolve to just `passwd` and cannot escape COMMANDS_DIR. Keep the existing `os.path.isfile` check as a secondary guard.",
+      "verify": "run_tests passes. Manually confirm that `os.path.basename` is applied before `os.path.join`.",
+      "done": "`_expand_slash_command` strips directory components from the command name before building the file path.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add unit tests for slash-command path traversal hardening",
+      "files": [
+        "cluster/agent/claude/test_server.py"
+      ],
+      "action": "Import `_expand_slash_command` from `server`. Add a new `TestExpandSlashCommand` class with tests: (1) normal command `/foo` returns file contents (mock `os.path.isfile` + `builtins.open`), (2) traversal attempt `/../../../etc/passwd` is stripped to `passwd.md` lookup and does NOT resolve outside COMMANDS_DIR, (3) `/../../../proc/self/environ` similarly neutralised, (4) non-slash query returned unchanged, (5) unknown command (no matching file) returns original query, (6) command with trailing args `/foo bar baz` extracts only `foo`. Use `tmp_path` or `unittest.mock.patch` for filesystem mocking.",
+      "verify": "run_tests passes. All new tests in TestExpandSlashCommand pass.",
+      "done": "At least 6 new tests covering normal expansion, traversal attempts, non-slash passthrough, unknown commands, and arg stripping.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Update THREAT_MODEL.md to mark RR-7 as resolved",
+      "files": [
+        "docs/THREAT_MODEL.md"
+      ],
+      "action": "In \u00a76 Residual Risks, change `RR-7: Slash Command Path Traversal Not Hardened` to strikethrough (~~...~~) with `\u2014 RESOLVED` status and date. Update the description to note the fix: `os.path.basename()` strips directory components; traversal is now structurally blocked. In \u00a79 Recommended Mitigations table, change the RR-7 row status from `Open` to `\u2705 Done (date)`. In \u00a77 STRIDE table, update the claude-server EoP cell to note RR-7 is resolved.",
+      "verify": "Grep THREAT_MODEL.md for 'RR-7' \u2014 all instances should show resolved/done status. run_tests passes.",
+      "done": "RR-7 marked as resolved in all three locations within THREAT_MODEL.md.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update PLAN.md and CONTEXT.md to reflect RR-7 completion",
+      "files": [
+        "docs/PLAN.md",
+        "docs/CONTEXT.md"
+      ],
+      "action": "In PLAN.md \u00a7Phase 5 P3 section, change the RR-7 checkbox from `[ ]` to `[X]` and append 'Done (date)' with a brief description. In CONTEXT.md, if slash-command security is mentioned, ensure it reflects the hardened state (basename stripping). No other changes needed.",
+      "verify": "Grep PLAN.md for 'RR-7' shows `[X]`. run_tests passes.",
+      "done": "RR-7 marked as completed in PLAN.md. CONTEXT.md consistent with the fix.",
+      "status": "completed"
+    }
+  ]
+}
