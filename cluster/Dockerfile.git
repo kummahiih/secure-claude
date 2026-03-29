@@ -1,0 +1,45 @@
+# Stage 1: Go Builder
+FROM golang:1.26.1-alpine AS builder
+WORKDIR /app
+COPY agent/gitserver/main.go agent/gitserver/go.mod ./
+RUN go build -o git-server main.go
+
+# Stage 2: Certificate Signer
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Mount CA from host to sign the git-server cert
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out git.key 2048 && \
+    openssl req -new -key git.key -out git.csr -subj "/CN=git-server" && \
+    echo "subjectAltName=DNS:git-server,DNS:localhost,IP:127.0.0.1" > git.ext && \
+    openssl x509 -req -in git.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out git.crt -days 365 -sha256 -extfile git.ext
+
+# Stage 3: Final Image
+FROM alpine:3.23.3
+RUN apk add --no-cache git
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -S appuser
+
+WORKDIR /app
+COPY --from=builder /app/git-server .
+
+# Copy internal identity
+COPY --from=signer --chown=appuser:appgroup /certs/git.crt /app/certs/git.crt
+COPY --from=signer --chown=appuser:appgroup /certs/git.key /app/certs/git.key
+COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
+
+RUN chmod 600 /app/certs/git.key
+
+COPY --chown=appuser:appgroup agent/gitserver/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+USER appuser
+EXPOSE 8443
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "git-server" || exit 1
