@@ -261,7 +261,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 ### TLS Everywhere (Internal)
 - Internal CA generated fresh on each `run.sh`. All service-to-service communication uses HTTPS with CA verification (`VERIFY=/app/certs/ca.crt` in all MCP wrappers).
-- `TLSConfig.MinVersion = tls.VersionTLS12` in Go servers (though TLS 1.2 is lower than ideal; Caddy uses 1.3).
+- `TLSConfig.MinVersion = tls.VersionTLS13` in all Go servers — mcp-server and tester-server were upgraded from TLS 1.2 on 2026-03-29. Caddy ingress also uses TLS 1.3.
 
 ### MCP Config as Build Artifact
 - `.mcp.json` is baked into the `claude-server` image at build time (COPY at line 63-88 of `Dockerfile.claude`). The agent cannot modify it at runtime — it is owned by appuser but `/home/appuser/sandbox/` has mode `500`.
@@ -342,11 +342,8 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### ~~RR-11: Claude Code Subprocess Stdout/Stderr Logged Fully~~ — RESOLVED (2026-03-28)
 - **Status:** Fixed. `server.py` now moves `result.stdout` and `result.stderr` logging to `DEBUG` level. All log lines that include subprocess output pass through `_redact_secrets()`, which replaces any known token value (`CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`) with `[REDACTED]` using a pre-compiled regex. The log level is configurable at runtime via the `LOG_LEVEL` environment variable (default: `INFO`), so DEBUG output is suppressed in production but available for troubleshooting. Unit tests for `_redact_secrets` cover: known token redaction, multiple tokens in one string, non-string passthrough, and no-token-configured passthrough.
 
-### RR-12: TLS Minimum Version TLS 1.2 on Internal Go Servers
-- **Severity:** Low  
-- **Likelihood:** Low  
-- **Description:** `mcp-server/main.go` and `tester/main.go` configure `TLSConfig.MinVersion = tls.VersionTLS12`. TLS 1.2 has known weaknesses (BEAST, RC4 suites in legacy configs). TLS 1.3 is available and preferred. Caddy's ingress uses TLS 1.3 but internal services allow 1.2.
-- **Recommendation:** Change `tls.VersionTLS12` to `tls.VersionTLS13` for internal service-to-service communication.
+### ~~RR-12: TLS Minimum Version TLS 1.2 on Internal Go Servers~~ — RESOLVED (2026-03-29)
+- **Status:** Fixed. Both `mcp-server/main.go` and `tester/main.go` now use `tls.VersionTLS13` as `MinVersion`. Unit tests (`TestTLSMinVersion13` in `mcp_test.go` and `main_test.go`) verify that TLS 1.2 connections are rejected with a handshake error.
 
 ### RR-13: Test Output Not Sanitised Before Presenting to Agent
 - **Severity:** Medium  
@@ -418,7 +415,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P3~~ | ~~RR-7~~ | ~~Add `name = os.path.basename(name)` in slash command expansion~~ | ✅ Done (2026-03-29) — `os.path.basename` + `PATH_BLACKLIST` check added; 11 unit tests cover traversal, blacklist, and happy-path cases |
 | P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |
 | ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`~~ | ✅ Done (2026-03-28) — all containers have cap_drop: ALL |
-| P4 | RR-12 | Upgrade Go servers to `tls.VersionTLS13` | Open |
+| ~~P4~~ | ~~RR-12~~ | ~~Upgrade Go servers to `tls.VersionTLS13`~~ | ✅ Done (2026-03-29) |
 | P4 | RR-13 | Document test output as a trust boundary; consider output length cap | Open |
 | P4 | RR-14 | Add field length limits to plan creation; consider human review gate | Open |
 | P4 | RR-15 | Whitelist allowed model names in `/ask` and `/plan` request validation | Open |

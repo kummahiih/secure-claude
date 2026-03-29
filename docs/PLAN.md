@@ -133,8 +133,10 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
 
 - [ ] **RR-10** Add cert expiry monitoring; document rotation procedure; consider
   90-day leaf cert lifetimes with automated renewal.
-- [ ] **RR-12** Upgrade Go servers (`mcp-server/main.go`, `tester/main.go`) from
-  `tls.VersionTLS12` to `tls.VersionTLS13`.
+- [X] **RR-12** ~~Upgrade Go servers (`mcp-server/main.go`, `tester/main.go`) from
+  `tls.VersionTLS12` to `tls.VersionTLS13`.~~
+  Done (2026-03-29). Both servers now use `tls.VersionTLS13`; `TestTLSMinVersion13`
+  unit tests verify TLS 1.2 connections are rejected.
 - [ ] **RR-13** Document test output as an explicit trust boundary; consider
   capping `output` length returned by `tester-server`.
 - [ ] **RR-14** Add maximum field-length validation to plan creation in
