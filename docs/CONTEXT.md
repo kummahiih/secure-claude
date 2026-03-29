@@ -131,6 +131,7 @@ Enforce boundaries structurally, never by filtering.
 15. Log sanitization — `server.py` subprocess stdout/stderr demoted to DEBUG level; `_redact_secrets()` replaces all known token values with `[REDACTED]` before any log output; configurable via `LOG_LEVEL` env var
 16. Tester subprocess timeout — `tester/main.go` uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT`) with `cmd.WaitDelay = 10s`; timed-out tests return exit code 124
 17. Structured file-access logging — mcp-server logs `FILE_READ: <path> (<n> bytes, sha256=<hex>)` only; no file content written to logs; regression test asserts content never appears in log output
+18. Slash command name hardening — `_expand_slash_command()` applies `os.path.basename()` to strip all directory components before building the file path, then rejects names matching `PATH_BLACKLIST` (`..`, `\0`, shell metacharacters); traversal is structural, not filtered (RR-7, resolved 2026-03-29)
 
 ### Token isolation matrix:
 

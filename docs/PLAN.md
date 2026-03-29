@@ -118,8 +118,11 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
 
 - [X] **RR-6** ~~URL-encode path parameters in `files_mcp.py` using the `params=`
   kwarg to `requests.get/post` instead of string interpolation.~~ Done (2026-03-28).
-- [ ] **RR-7** Strip directory components from slash-command names in `server.py`:
-  add `name = os.path.basename(name)` (or reject names containing `/` or `..`).
+- [X] **RR-7** ~~Strip directory components from slash-command names in `server.py`:
+  add `name = os.path.basename(name)` (or reject names containing `/` or `..`).~~
+  Done (2026-03-29). `os.path.basename(name)` applied before `os.path.join`; `PATH_BLACKLIST`
+  rejects names with `..`, null bytes, and shell metacharacters. 11 unit tests added
+  to `test_server.py` (`TestExpandSlashCommand`).
 - [ ] **RR-8** Add rate limiting or concurrency cap on `/ask` and `/plan`
   endpoints (Caddy rate-limit directive or FastAPI semaphore).
 - [X] **RR-9** ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`,

@@ -1,6 +1,6 @@
 # Threat Model: secure-claude
 
-**Date:** 2026-03-26 (updated 2026-03-28)  
+**Date:** 2026-03-26 (updated 2026-03-29)  
 **Scope:** secure-claude cluster — hardened containerised environment for running Claude Code as an autonomous AI agent  
 **Classification:** Internal Engineering Review
 
@@ -319,11 +319,10 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Likelihood:** Low  
 - **Status:** Fixed. All path query parameters in `files_mcp.py` now use the `requests` `params=` kwarg instead of string interpolation. Unit tests verify special characters (`&`, `#`, `?`, spaces) are correctly passed through without URL corruption. Applies to `/read`, `/create`, `/remove`, and `/mkdir` endpoints.
 
-### RR-7: Slash Command Path Traversal Not Hardened
+### ~~RR-7: Slash Command Path Traversal Not Hardened~~ — RESOLVED (2026-03-29)
 - **Severity:** Low  
 - **Likelihood:** Low (commands dir is root-owned; no new .md files can be added)  
-- **Description:** `server.py` lines 31-32: `name = query[1:].split()[0]` followed by `cmd_path = os.path.join(COMMANDS_DIR, f"{name}.md")`. If `name` contains `../`, `os.path.join` will resolve a path outside `COMMANDS_DIR`. Example: query `/../../../proc/self/environ` → name is `/../../../proc/self/environ` → path resolves outside the commands directory. Currently mitigated because (a) the resulting path must end in `.md` and (b) `os.path.isfile` must return True. However, security-by-convention rather than enforcement.
-- **Recommendation:** Add `name = os.path.basename(name)` to strip any directory components, or reject names containing `/` or `..` with a 400 error.
+- **Status:** Fixed. `_expand_slash_command()` now applies `name = os.path.basename(name)` immediately after extracting the command token, structurally stripping all directory components. A `PATH_BLACKLIST` check (covering `..`, `\0`, shell metacharacters, etc.) then rejects any name that still contains a dangerous character, logging a warning and returning the original query unchanged. The existing `os.path.isfile` guard remains as a secondary check. Unit tests in `test_server.py` (`TestExpandSlashCommand`) cover: traversal stripping, deep nested traversal, blacklisted characters, null bytes, empty name after stripping, valid expansion, and arg-stripping.
 
 ### RR-8: No Rate Limiting on /ask Endpoint
 - **Severity:** Medium  
@@ -374,7 +373,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
 | **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 fixed) | No request audit log | ~~Egress MITM~~ (RR-1 fixed) | No rate limit (RR-8) | — |
-| **claude-server** | — | Prompt injection via workspace (§4.2) | ~~Full stdout logging (RR-11)~~ fixed | Env vars in subprocess scope (§4.1); ~~log leakage (RR-11)~~ fixed | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
+| **claude-server** | — | Prompt injection via workspace (§4.2) | ~~Full stdout logging (RR-11)~~ fixed | Env vars in subprocess scope (§4.1); ~~log leakage (RR-11)~~ fixed | Unlimited concurrent subprocesses (RR-8) | ~~Slash command path traversal (RR-7)~~ fixed |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
 | **files_mcp.py** | — | ~~URL param injection (RR-6)~~ | — | — | — | — |
 | **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | ~~File content fully logged (RR-5)~~ fixed | ~~File content in logs (RR-5)~~ fixed | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
@@ -416,7 +415,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P2~~ | ~~RR-5~~ | ~~Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go`~~ | ✅ Done (2026-03-28) — replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`; regression test added |
 | ~~P2~~ | ~~RR-11~~ | ~~Redact secrets from `server.py` log output; move full stdout to DEBUG~~ | ✅ Done (2026-03-28) — `_redact_secrets()` covers all known tokens; stdout/stderr at DEBUG; `LOG_LEVEL` env var configurable |
 | ~~P3~~ | ~~RR-6~~ | ~~URL-encode path parameters in `files_mcp.py` using `params=` kwarg~~ | ✅ Done (2026-03-28) |
-| P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
+| ~~P3~~ | ~~RR-7~~ | ~~Add `name = os.path.basename(name)` in slash command expansion~~ | ✅ Done (2026-03-29) — `os.path.basename` + `PATH_BLACKLIST` check added; 11 unit tests cover traversal, blacklist, and happy-path cases |
 | P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |
 | ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`~~ | ✅ Done (2026-03-28) — all containers have cap_drop: ALL |
 | P4 | RR-12 | Upgrade Go servers to `tls.VersionTLS13` | Open |
