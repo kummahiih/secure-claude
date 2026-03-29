@@ -161,14 +161,14 @@ services:
     environment:
       - TESTER_API_TOKEN=${TESTER_API_TOKEN}
       - SSL_CERT_FILE=/app/certs/ca.crt
-      - GOMAXPROCS=10
+      - GOMAXPROCS=1
     volumes:
       - ./workspace:/workspace:ro
     networks:
       - int_net
     mem_limit: 1g
     cpus: 1.0
-    pids_limit: 150
+    pids_limit: 1024
     cap_drop:
       - ALL
     restart: unless-stopped
