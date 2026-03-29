@@ -1,0 +1,75 @@
+{
+  "id": "plan-20260329-095632",
+  "goal": "Add a plan_unblock workflow: a new REST endpoint + MCP tool that transitions a blocked task back to current, with resume context stored on the blocked task and cleaned up upon successful unblock.",
+  "status": "completed",
+  "created": "2026-03-29T09:56:32.223530+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add /unblock REST endpoint to plan_server.py",
+      "files": [
+        "cluster/planner/planner/plan_server.py"
+      ],
+      "action": "1. Add an UnblockRequest model with fields: task_id (str), required. 2. Add a POST /block endpoint update: when blocking a task, also store a 'resume_context' field on the task (string, initially empty \u2014 the blocking agent already passes a 'reason' which goes into 'blockers'). 3. Add a new POST /unblock endpoint that: (a) finds the active plan, (b) verifies the given task_id matches a blocked task, (c) if there is already a 'current' task returns 400, (d) transitions the blocked task back to 'current', (e) returns the task including its existing 'blockers' and 'resume_context' fields so the resuming agent has context. 4. Extend the POST /block endpoint: accept an optional 'context' field (string) in BlockRequest and store it as 'resume_context' on the task alongside 'blockers'. This captures what work was already done.",
+      "verify": "run_tests passes (plan_server_test.py)",
+      "done": "POST /unblock endpoint exists, transitions blocked\u2192current, returns resume context, and rejects if another task is already current",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add /unblock server tests",
+      "files": [
+        "cluster/planner/planner/plan_server_test.py"
+      ],
+      "action": "Add a TestUnblock class with tests: (1) test_unblocks_blocked_task \u2014 blocks t2, calls /unblock with task_id=t2, verifies status returns to 'current' and response includes blockers and resume_context. (2) test_unblock_wrong_id \u2014 tries to unblock a non-blocked task, expects 400. (3) test_unblock_with_existing_current \u2014 blocks t2 but another task is current, expects 400. (4) test_unblock_no_plan \u2014 expects 404. (5) test_unblock_clears_context_on_complete \u2014 after unblock, complete the task, verify resume_context and blockers are removed from the saved JSON. Also add a test to TestBlock that verifies the optional 'context' field is stored as 'resume_context' on the task.",
+      "verify": "run_tests passes (plan_server_test.py)",
+      "done": "All 6+ new tests pass, covering unblock happy path, error cases, and context lifecycle",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Add plan_unblock MCP tool to plan_mcp.py",
+      "files": [
+        "cluster/planner/planner/plan_mcp.py"
+      ],
+      "action": "1. Add a plan_unblock tool to list_tools() with inputSchema: task_id (required string). Description: 'Unblock a blocked task and resume execution. Returns the task with its block reason and resume context.' 2. Add the plan_unblock case in _dispatch(): POST to {PLAN_SERVER_URL}/unblock with {task_id}. Handle 200 (success), 400 (ValueError), 404 (FileNotFoundError), and 5xx (RuntimeError). 3. Update the plan_block tool: add an optional 'context' param in inputSchema (string, description: 'Summary of work already done \u2014 used to resume if unblocked'). Pass it in the POST body to /block.",
+      "verify": "run_tests passes (plan_mcp_test.py)",
+      "done": "plan_unblock tool listed, dispatches correctly, plan_block accepts optional context param",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Add plan_unblock MCP tool tests",
+      "files": [
+        "cluster/planner/planner/plan_mcp_test.py"
+      ],
+      "action": "Add tests: (1) test_unblock_success \u2014 mock POST 200, verify JSON output includes task with blockers/resume_context. (2) test_unblock_wrong_id \u2014 mock POST 400, verify ValueError. (3) test_unblock_no_plan \u2014 mock POST 404, verify FileNotFoundError. (4) test_unblock_server_error \u2014 mock POST 500, verify RuntimeError. (5) test_block_with_context \u2014 verify plan_block passes optional 'context' field in POST body.",
+      "verify": "run_tests passes (plan_mcp_test.py)",
+      "done": "All 5 new MCP wrapper tests pass",
+      "status": "completed"
+    },
+    {
+      "id": "t5",
+      "name": "Clean up resume_context on plan_complete",
+      "files": [
+        "cluster/planner/planner/plan_server.py"
+      ],
+      "action": "In the /complete endpoint, after marking the task 'completed', delete 'resume_context' and 'blockers' keys from the task dict if they exist (use task.pop('resume_context', None) and task.pop('blockers', None)). This ensures completed tasks don't carry stale block artifacts.",
+      "verify": "run_tests passes (plan_server_test.py) \u2014 existing complete tests still pass, plus the unblock\u2192complete\u2192verify-cleanup test from task 2",
+      "done": "resume_context and blockers are removed from a task's JSON when it is completed",
+      "status": "completed"
+    },
+    {
+      "id": "t6",
+      "name": "Update system prompt and workflow docs",
+      "files": [
+        "cluster/agent/prompts/system/ask.md",
+        "cluster/agent/docs/WORKFLOW.md"
+      ],
+      "action": "1. In ask.md step 2, update the blocked-task handling: instead of 'output the block reason and stop', change to: 'If the task status is **blocked**: check if the user's query indicates the blockage has been resolved. If so, call plan_unblock with the task_id to resume it, then proceed with execution using the resume_context for continuity. If the user has not indicated resolution, output the block reason and resume_context to the user and stop.' 2. In WORKFLOW.md, update the flow diagram to show a new branch from 'status = blocked' that goes to plan_unblock \u2192 execute task. Update the Rules table: 'Blocked tasks: If user indicates blockage resolved, call plan_unblock and resume; otherwise output reason and stop.'",
+      "verify": "Read the files and confirm the instructions are clear and consistent",
+      "done": "System prompt instructs agent to use plan_unblock when user signals blockage resolved; workflow diagram updated",
+      "status": "completed"
+    }
+  ]
+}
