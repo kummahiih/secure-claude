@@ -98,6 +98,14 @@ echo "[+] Scanning Go deps (govulncheck)..."
   else
     echo "$GOVULN_TS" | tail -5
   fi
+
+  echo '  Scanning gitserver...'
+  GOVULN_GS=$(cd cluster/agent/gitserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  if echo "$GOVULN_GS" | grep -q 'No vulnerabilities found'; then
+    echo '  ✅ gitserver govulncheck clean'
+  else
+    echo "$GOVULN_GS" | tail -5
+  fi
 ) || echo "  ⚠️  govulncheck section failed"
 
 echo "[+] Scanning Python deps (pip-audit)..."
