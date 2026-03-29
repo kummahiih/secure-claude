@@ -314,11 +314,10 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### ~~RR-5: File Content Logged in Plaintext (mcp-server)~~ — RESOLVED (2026-03-28)
 - **Status:** Fixed. The `FILE_SUCCESS` log line that emitted full file content has been replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)` — only path, byte count, and SHA-256 hash are logged. No file content is written to logs. A regression test (`TestReadContentNotLogged` in `mcp_test.go`) asserts that the sentinel string never appears in log output on every read.
 
-### RR-6: URL Path Parameter Not URL-Encoded in files_mcp.py
+### ~~RR-6: URL Path Parameter Not URL-Encoded in files_mcp.py~~ — RESOLVED (2026-03-28)
 - **Severity:** Low  
 - **Likelihood:** Low  
-- **Description:** `files_mcp.py` constructs URLs via string interpolation without URL-encoding the path parameter: `f"{MCP_SERVER_URL}/read?path={arguments['file_path']}"`. A path containing `&`, `#`, `?`, or encoded characters could cause the mcp-server to misinterpret the request. The Go `os.OpenRoot` jail prevents traversal, but the HTTP layer may parse the URL unexpectedly (e.g., `path=foo&bar=baz` would appear as two query parameters). This is also present for `/create`, `/remove`, `/mkdir`.
-- **Recommendation:** Use `urllib.parse.urlencode` or `params=` argument to `requests.get()` for all URL-parameter-based endpoints.
+- **Status:** Fixed. All path query parameters in `files_mcp.py` now use the `requests` `params=` kwarg instead of string interpolation. Unit tests verify special characters (`&`, `#`, `?`, spaces) are correctly passed through without URL corruption. Applies to `/read`, `/create`, `/remove`, and `/mkdir` endpoints.
 
 ### RR-7: Slash Command Path Traversal Not Hardened
 - **Severity:** Low  
@@ -377,7 +376,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 | **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 fixed) | No request audit log | ~~Egress MITM~~ (RR-1 fixed) | No rate limit (RR-8) | — |
 | **claude-server** | — | Prompt injection via workspace (§4.2) | ~~Full stdout logging (RR-11)~~ fixed | Env vars in subprocess scope (§4.1); ~~log leakage (RR-11)~~ fixed | Unlimited concurrent subprocesses (RR-8) | Slash command path traversal (RR-7) |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses (§4.2) | — | — | — | — |
-| **files_mcp.py** | — | URL param injection (RR-6) | — | — | — | — |
+| **files_mcp.py** | — | ~~URL param injection (RR-6)~~ | — | — | — | — |
 | **mcp-server (Go)** | ~~Token shared with 2 other services (RR-4)~~ fixed | — | ~~File content fully logged (RR-5)~~ fixed | ~~File content in logs (RR-5)~~ fixed | ~~No resource limits (RR-3)~~ fixed | cap_drop: ALL ✓ |
 | **git_mcp.py** | — | Submodule path accepted without extra validation | — | Git history poisoning vector (§4.2) | — | — |
 | **plan-server** | ~~Shared MCP_API_TOKEN (RR-4)~~ fixed | Plan content injection (RR-14) | — | — | — | cap_drop: ALL ✓ |
@@ -416,7 +415,7 @@ The following controls are notably above baseline for an "AI agent in a containe
 | ~~P2~~ | ~~RR-4~~ | ~~Introduce `TESTER_API_TOKEN` and `PLAN_API_TOKEN` separate from `MCP_API_TOKEN`~~ | ✅ Done (2026-03-28) — per-service tokens for mcp-server, plan-server, tester-server |
 | ~~P2~~ | ~~RR-5~~ | ~~Remove or reduce `FILE_SUCCESS` content logging in `fileserver/main.go`~~ | ✅ Done (2026-03-28) — replaced with `FILE_READ: <path> (<n> bytes, sha256=<hex>)`; regression test added |
 | ~~P2~~ | ~~RR-11~~ | ~~Redact secrets from `server.py` log output; move full stdout to DEBUG~~ | ✅ Done (2026-03-28) — `_redact_secrets()` covers all known tokens; stdout/stderr at DEBUG; `LOG_LEVEL` env var configurable |
-| P3 | RR-6 | URL-encode path parameters in `files_mcp.py` using `params=` kwarg | Open |
+| ~~P3~~ | ~~RR-6~~ | ~~URL-encode path parameters in `files_mcp.py` using `params=` kwarg~~ | ✅ Done (2026-03-28) |
 | P3 | RR-7 | Add `name = os.path.basename(name)` in slash command expansion | Open |
 | P3 | RR-8 | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | Open |
 | ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: [ALL]` to `claude-server`, `mcp-server`, `plan-server`, `tester-server`~~ | ✅ Done (2026-03-28) — all containers have cap_drop: ALL |
