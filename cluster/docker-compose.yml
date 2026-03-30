@@ -173,6 +173,31 @@ services:
       - ALL
     restart: unless-stopped
 
+  git-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.git
+    container_name: git-server
+    user: "1000:1000"
+    environment:
+      - GIT_API_TOKEN=${GIT_API_TOKEN}
+      - SSL_CERT_FILE=/app/certs/ca.crt
+      - GIT_DIR=/gitdir
+      - GIT_WORK_TREE=/workspace
+    volumes:
+      - ./workspace/.git:/gitdir
+      - ./workspace:/workspace:ro
+    tmpfs:
+      - /workspace/.git:ro,size=0
+    networks:
+      - int_net
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
 networks:
   ext_net:
     driver: bridge

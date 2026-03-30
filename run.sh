@@ -39,6 +39,7 @@ export MCP_API_TOKEN=$(openssl rand -hex 32)
 export PLAN_API_TOKEN=$(openssl rand -hex 32)
 export TESTER_API_TOKEN=$(openssl rand -hex 32)
 export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
+export GIT_API_TOKEN=$(openssl rand -hex 32)
 
 # Create the standard .env file for Docker Compose
 {
@@ -47,6 +48,7 @@ export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
     echo "PLAN_API_TOKEN=$PLAN_API_TOKEN"
     echo "TESTER_API_TOKEN=$TESTER_API_TOKEN"
     echo "CLAUDE_API_TOKEN=$CLAUDE_API_TOKEN"
+    echo "GIT_API_TOKEN=$GIT_API_TOKEN"
 } > .env
 
 # Also keep the export-style file for query.sh compatibility
@@ -56,6 +58,7 @@ export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
     echo "export PLAN_API_TOKEN=\"$PLAN_API_TOKEN\""
     echo "export TESTER_API_TOKEN=\"$TESTER_API_TOKEN\""
     echo "export CLAUDE_API_TOKEN=\"$CLAUDE_API_TOKEN\""
+    echo "export GIT_API_TOKEN=\"$GIT_API_TOKEN\""
 } > .cluster_tokens.env
 
 # Ensure directories exist
