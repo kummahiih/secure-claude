@@ -354,11 +354,11 @@ Both `mcp-server/main.go` and `tester/main.go` now use `tls.VersionTLS13`. Unit 
 ### ~~RR-14: Plan Field-length Validation Missing~~ — RESOLVED (2026-03-30)
 Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit tests added.
 
-### RR-15: Agent Model Parameter Not Validated
+### ~~RR-15: Agent Model Parameter Not Validated~~ — RESOLVED (2026-03-30)
 - **Severity:** Low
 - **Likelihood:** Low
 - **Description:** `server.py` passes `request.model` directly to `--model` flag. Shell injection is not possible (subprocess args are a list). However, an attacker with `CLAUDE_API_TOKEN` could specify arbitrary model names, potentially causing errors or unintended API usage.
-- **Recommendation:** Validate `request.model` against a whitelist of known model names.
+- **Status: Fixed** — `ALLOWED_MODELS` frozenset (`claude-sonnet-4-6`, `claude-opus-4-6`, `claude-haiku-4-5-20251001`) defined in `server.py`. `_validate_model()` is called at the top of both `/ask` and `/plan` before any subprocess is spawned; unknown models are rejected with HTTP 400. Five unit tests cover reject/accept/empty/prefix-attack cases.
 
 ### RR-16: Unbounded Request Body Size on /ask and /plan *(NEW)*
 - **Severity:** Medium
@@ -417,7 +417,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | **git-server** | — | Submodule path accepted without extra validation | — | Git history poisoning (§4.2) | — | — |
 | **plan-server** | — | ~~Plan content injection (RR-14)~~ ✅ | — | — | — | cap_drop: ALL ✓ |
 | **tester-server** | — | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ ✅; ~~no resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
-| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | Model routing manipulation | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
+| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | ~~Model routing manipulation~~ (RR-15 fixed) | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
 
 ---
@@ -461,5 +461,5 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | **P3** | **RR-8** | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | **Open** |
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
 | P4 | RR-13 | Document test output as trust boundary; add output length cap | Open |
-| P4 | RR-15 | Whitelist allowed model names in `/ask` and `/plan` | Open |
+| ~~P4~~ | ~~RR-15~~ | ~~Whitelist allowed model names in `/ask` and `/plan`~~ | ✅ Done 2026-03-30 |
 | P4 | RR-10 | Add cert expiry monitoring; document rotation procedure | Open |
