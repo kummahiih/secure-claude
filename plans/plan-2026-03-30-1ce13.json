@@ -1,0 +1,41 @@
+{
+  "id": "plan-20260330-195022",
+  "goal": "Fix RR-18: Add GIT_API_TOKEN to the log redaction list in server.py, update tests, and mark resolved in THREAT_MODEL.md",
+  "status": "completed",
+  "created": "2026-03-30T19:50:22.627696+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add GIT_API_TOKEN to _SECRET_TOKENS in server.py",
+      "files": [
+        "cluster/agent/claude/server.py"
+      ],
+      "action": "1. Update the import line from runenv to include GIT_API_TOKEN:\n   `from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT`\n2. Add GIT_API_TOKEN to the _SECRET_TOKENS list (line 35):\n   `_SECRET_TOKENS = [t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN] if t]`\nNo other changes needed \u2014 _SECRET_RE and _redact_secrets() are already driven by _SECRET_TOKENS.",
+      "verify": "run_tests passes; python -c 'import server' does not error",
+      "done": "GIT_API_TOKEN appears in both the runenv import and the _SECRET_TOKENS list in server.py",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Update test_server.py mock and add GIT_API_TOKEN redaction test",
+      "files": [
+        "cluster/agent/claude/test_server.py"
+      ],
+      "action": "1. Add GIT_API_TOKEN to the runenv mock at the top of test_server.py (line ~11):\n   `sys.modules['runenv'] = MagicMock(CLAUDE_API_TOKEN='dummy-token', DYNAMIC_AGENT_KEY='dummy-key', ANTHROPIC_BASE_URL='https://api.anthropic.com', MCP_API_TOKEN='dummy-mcp-token', PLAN_API_TOKEN='dummy-plan-token', TESTER_API_TOKEN='dummy-tester-token', GIT_API_TOKEN='dummy-git-token', SYSTEM_PROMPT='test system prompt', PLAN_SYSTEM_PROMPT='test plan system prompt')`\n2. Add a new test method to TestRedactSecrets:\n   `def test_git_api_token_is_redacted(self):`\n   - Assert that 'dummy-git-token' (the GIT_API_TOKEN value) is present in _server_module._SECRET_TOKENS\n   - Assert that _redact_secrets('leaked dummy-git-token here') replaces it with [REDACTED]\n   This test directly verifies the RR-18 fix \u2014 if GIT_API_TOKEN is ever removed from _SECRET_TOKENS, this test will catch it.",
+      "verify": "run_tests passes; the new test_git_api_token_is_redacted test passes",
+      "done": "test_server.py mock includes GIT_API_TOKEN; dedicated test asserts GIT_API_TOKEN is in _SECRET_TOKENS and is redacted",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Mark RR-18 resolved in THREAT_MODEL.md",
+      "files": [
+        "docs/THREAT_MODEL.md"
+      ],
+      "action": "Update THREAT_MODEL.md to mark RR-18 as resolved:\n1. In section 4.4 (RR-18 description block, ~line 223-233): Add a status line `- **Status: Fixed** \u2014 GIT_API_TOKEN added to _SECRET_TOKENS in server.py. Dedicated unit test verifies redaction.`\n2. In section 5 'Log Sanitization' bullet (~line 294): Remove the parenthetical gap note `(Gap: GIT_API_TOKEN not currently included \u2014 see RR-18.)` and replace with confirmation that all tokens are now redacted.\n3. In the STRIDE table (~line 409): Change `GIT_API_TOKEN not redacted (RR-18)` to `~~GIT_API_TOKEN not redacted (RR-18)~~ \u2705`\n4. In section 9 priority table (~line 455): Change the RR-18 row from `**Open**` to `\u2705 Done 2026-03-30`, and apply strikethrough formatting matching other resolved rows.\n5. In section 6 (Residual Risks), retitle the RR-18 block with strikethrough: `### ~~RR-18: GIT_API_TOKEN Absent from Log Redaction List~~ \u2014 RESOLVED (2026-03-30)` and remove the *(NEW)* tag.",
+      "verify": "grep for 'RR-18' in THREAT_MODEL.md shows all occurrences are marked resolved/strikethrough; no 'Open' status remains for RR-18",
+      "done": "All RR-18 references in THREAT_MODEL.md are marked as resolved with date 2026-03-30",
+      "status": "completed"
+    }
+  ]
+}
