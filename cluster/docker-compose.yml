@@ -82,6 +82,8 @@ services:
       - MCP_SERVER_URL=https://mcp-server:8443
       - PLAN_SERVER_URL=https://plan-server:8443
       - TESTER_SERVER_URL=https://tester-server:8443
+      - GIT_API_TOKEN=${GIT_API_TOKEN}
+      - GIT_SERVER_URL=https://git-server:8443
       - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt        # for Node.js/Claude Code
       - CURL_CA_BUNDLE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
@@ -100,6 +102,7 @@ services:
       - plan-server
       - tester-server
       - proxy
+      - git-server
     mem_limit: 4g
     cpus: 2.0
     pids_limit: 200
