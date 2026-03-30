@@ -1,0 +1,42 @@
+{
+  "id": "plan-20260330-125908",
+  "goal": "Complete the remaining work from PLAN_GIT_MCP.md: strip git mounts/env from claude-server, remove baseline capture from its entrypoint, and update docs to reflect the new 7-container architecture.",
+  "status": "completed",
+  "created": "2026-03-30T12:59:08.816677+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Strip workspace/gitdir from claude-server",
+      "files": [
+        "cluster/docker-compose.yml",
+        "cluster/Dockerfile.claude"
+      ],
+      "action": "In docker-compose.yml claude-server: remove volumes ./workspace:/workspace:ro and ./workspace/.git:/gitdir; remove env vars GIT_DIR and GIT_WORK_TREE. In Dockerfile.claude: remove the `git` package install if present (git now lives only in git-server).",
+      "verify": "docker compose config shows no /workspace or /gitdir mounts under claude-server; GIT_DIR and GIT_WORK_TREE absent from its environment block.",
+      "done": "claude-server service in docker-compose.yml has no /workspace or /gitdir volumes and no GIT_DIR/GIT_WORK_TREE env vars; Dockerfile.claude does not install git.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Remove baseline capture from claude-server entrypoint",
+      "files": [
+        "cluster/agent/claude/entrypoint.sh"
+      ],
+      "action": "Delete the `if [ -n \"$GIT_DIR\" ] && [ -n \"$GIT_WORK_TREE\" ]` block (baseline commit capture). Baseline capture now happens in git-server's entrypoint. Keep the isolation check and exec lines.",
+      "verify": "entrypoint.sh contains no reference to GIT_DIR, GIT_WORK_TREE, or GIT_BASELINE_COMMIT.",
+      "done": "entrypoint.sh has the baseline capture block removed.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Update docs/CONTEXT.md for new architecture",
+      "files": [
+        "docs/CONTEXT.md"
+      ],
+      "action": "Update CONTEXT.md to reflect the 7-container architecture: (1) architecture diagram: change git_mcp.py line to show HTTPS REST \u2192 git-server:8443; add git-server to the indented service tree. (2) Service inventory table: rename to 'Seven containers', add git-server row. (3) MCP tools table: change git row transport from 'stdio \u2192 git subprocess' to 'stdio \u2192 HTTPS REST'; change access from 'Read/write /gitdir...' to 'via git-server:8443'. (4) Request flow step 6: change from 'git subprocess' to 'HTTPS REST \u2192 git-server:8443'. (5) Volume mounts on claude-server: remove /workspace and /gitdir rows; keep only /docs row. Add new 'Volume mounts on git-server' table with /gitdir (rw) and /workspace:ro rows. (6) Security principles: update item 14 to say 'seven containers'. (7) Token isolation matrix: add GIT_API_TOKEN row with claude-server \u2713 required, git-server \u2713 required, others \u2717 forbidden.",
+      "verify": "CONTEXT.md mentions git-server, shows 7 containers, has no 'git subprocess' references in the architecture section.",
+      "done": "docs/CONTEXT.md accurately describes the 7-container architecture with git-server.",
+      "status": "completed"
+    }
+  ]
+}

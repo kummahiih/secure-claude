@@ -1,0 +1,86 @@
+{
+  "id": "plan-20260330-101727",
+  "goal": "Take the git-server REST API into use: convert git_mcp.py from subprocess to REST client, add unit tests to verify behavior matches the old Python MCP, and wire up all supporting configuration (runenv, verify_isolation, entrypoint, run.sh, docker-compose). Prefer old Python MCP behavior \u2014 if the Go git-server behaves differently, fix the Go server and its tests to match.",
+  "status": "completed",
+  "created": "2026-03-30T10:17:27.174669+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Fix git-server error responses to return JSON consistently",
+      "files": [
+        "cluster/agent/gitserver/main.go",
+        "cluster/agent/gitserver/main_test.go"
+      ],
+      "action": "The Go git-server currently returns errors as plain text via http.Error() but successes as JSON {\"output\": \"...\"}. The old Python git_mcp.py returned structured CallToolResult with isError flag and text content for ALL responses. Fix all error paths in main.go handlers (handleStatus, handleDiff, handleAdd, handleCommit, handleLog, handleReset) to return JSON error responses: writeJSON(w, statusCode, map[string]string{\"error\": \"message\"}) instead of http.Error(). This ensures the REST client can parse all responses uniformly. Also fix handleAdd to return isError-equivalent for 'no paths' (currently 400 plain text). The 'nothing to commit' case in handleCommit already returns 200 JSON \u2014 that's correct and matches old Python behavior. Update main_test.go: for error cases that currently check resp.Body for plain text, update them to decode JSON {\"error\": \"...\"} instead.",
+      "verify": "run_tests passes (cd gitserver && go test -v ./...)",
+      "done": "All git-server error responses are JSON {\"error\": \"...\"}, all success responses are JSON {\"output\": \"...\"}, and all existing tests pass",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add GIT_SERVER_URL and GIT_API_TOKEN to runenv.py",
+      "files": [
+        "cluster/agent/claude/runenv.py"
+      ],
+      "action": "Add two new env var lookups following the existing pattern (see TESTER_SERVER_URL, TESTER_API_TOKEN as reference):\n\nGIT_SERVER_URL = os.environ.get('GIT_SERVER_URL', 'https://git-server:8443')\nGIT_API_TOKEN = os.getenv('GIT_API_TOKEN')\n\nPlace them after the existing TESTER_ lines. Do NOT log missing token warnings (matching the comment already in runenv.py about verify_isolation.py handling that).",
+      "verify": "run_tests passes (python -m pytest claude_tests.py -v)",
+      "done": "GIT_SERVER_URL and GIT_API_TOKEN are importable from runenv and resolve from env vars with correct defaults",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Convert git_mcp.py from subprocess to REST client",
+      "files": [
+        "cluster/agent/claude/git_mcp.py"
+      ],
+      "action": "Rewrite git_mcp.py to be a REST client to git-server:8443, following the exact pattern of tester_mcp.py and files_mcp.py. Key changes:\n\n1. Remove all subprocess imports and subprocess-based code (_run_git, _run_git_env, git_env_for, parse_gitmodules, BASELINE_COMMIT, SUBMODULE_BASELINE_COMMITS, all startup baseline capture logic)\n2. Add: from runenv import GIT_SERVER_URL, GIT_API_TOKEN\n3. Add: HEADERS = {\"Authorization\": f\"Bearer {GIT_API_TOKEN}\"} and VERIFY = \"/app/certs/ca.crt\"\n4. Keep all 6 MCP tool definitions (names, schemas) IDENTICAL \u2014 the agent-facing interface must not change\n5. Rewrite each tool function to make HTTP calls:\n   - git_status: GET {GIT_SERVER_URL}/status?submodule_path=...\n   - git_diff: GET {GIT_SERVER_URL}/diff?staged=true/false&submodule_path=...\n   - git_add: POST {GIT_SERVER_URL}/add with JSON {\"paths\": [...]}\n   - git_commit: POST {GIT_SERVER_URL}/commit with JSON {\"message\": \"...\", \"submodule_path\": \"...\"}\n   - git_log: GET {GIT_SERVER_URL}/log?max_count=N&submodule_path=...\n   - git_reset_soft: POST {GIT_SERVER_URL}/reset with JSON {\"count\": N, \"submodule_path\": \"...\"}\n6. For success (200), parse JSON response and return _ok(data[\"output\"])\n7. For errors (non-200), parse JSON {\"error\": \"...\"} and return _err(data[\"error\"])\n8. Handle connection errors, timeouts (30s), and 401 with appropriate _err messages\n9. Keep _ok() and _err() helpers unchanged\n10. Keep the async MCP server wiring (server, handle_list_tools, handle_call_tool, main) unchanged",
+      "verify": "run_tests passes (python -m pytest git_mcp_test.py -v)",
+      "done": "git_mcp.py makes REST calls instead of subprocess calls; no subprocess import remains; all tool names/schemas unchanged",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Rewrite git_mcp_test.py for REST client with mocked HTTP",
+      "files": [
+        "cluster/agent/claude/git_mcp_test.py"
+      ],
+      "action": "Rewrite the test file to test the new REST-client git_mcp.py. Follow the pattern of files_mcp_test.py and tester_mcp_test.py for mocking HTTP. Key changes:\n\n1. Remove all real git repo fixtures (git_repo, _make_commits), subprocess imports, and monkeypatch of GIT_DIR/GIT_WORK_TREE\n2. Remove TestParseGitmodules, TestGitEnvFor, TestHookPrevention, TestPerSubmoduleBaseline classes (these are now git-server's responsibility \u2014 tested in main_test.go)\n3. Use unittest.mock.patch('requests.get') and patch('requests.post') to mock HTTP calls\n4. Test each tool function for:\n   a. Correct URL construction (includes params/query strings)\n   b. Authorization header present with Bearer token\n   c. Success case: 200 response with JSON {\"output\": \"text\"} \u2192 returns _ok result\n   d. Error case: 4xx/5xx response with JSON {\"error\": \"msg\"} \u2192 returns _err result\n   e. Connection error / timeout \u2192 returns _err result\n5. Preserve test coverage for all 6 tools: status, diff, add, commit, log, reset_soft\n6. Test that git_status passes submodule_path as query param\n7. Test that git_diff passes staged=true/false as query param\n8. Test that git_add sends JSON body with paths array\n9. Test that git_commit sends JSON body with message and submodule_path\n10. Test that git_add with empty paths returns _err (client-side validation preserved from old code)\n11. Test that git_commit with empty message returns _err (client-side validation preserved)\n12. Set env vars GIT_SERVER_URL and GIT_API_TOKEN in test setup (using os.environ.setdefault before import, same pattern as the old test file)",
+      "verify": "run_tests passes (python -m pytest git_mcp_test.py -v)",
+      "done": "All git_mcp tool functions have test coverage for success, error, and edge cases; no subprocess mocking remains; tests use HTTP mocking",
+      "status": "completed"
+    },
+    {
+      "id": "t5",
+      "name": "Update test.sh and agent test infra for new git_mcp dependencies",
+      "files": [
+        "cluster/agent/test.sh"
+      ],
+      "action": "Update cluster/agent/test.sh to add dummy env vars needed by the new REST-client git_mcp.py:\n\nexport GIT_API_TOKEN=\"${GIT_API_TOKEN:-dummy-git-token}\"\nexport GIT_SERVER_URL=\"${GIT_SERVER_URL:-https://git-server:8443}\"\n\nPlace alongside the existing dummy token exports at the top of the file. This ensures git_mcp_test.py can import git_mcp without crashing on missing env vars (matching the pattern already used for MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN).",
+      "verify": "run_tests passes (bash test.sh runs git_mcp_test.py without import errors)",
+      "done": "test.sh exports GIT_API_TOKEN and GIT_SERVER_URL; git_mcp_test.py runs successfully in the test harness",
+      "status": "completed"
+    },
+    {
+      "id": "t6",
+      "name": "Update verify_isolation.py for git-server role and GIT_API_TOKEN",
+      "files": [
+        "cluster/agent/claude/verify_isolation.py"
+      ],
+      "action": "Add git-server isolation rules and update existing roles:\n\n1. Add 'git-server' to FORBIDDEN_ENV_VARS with: ANTHROPIC_API_KEY, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, CLAUDE_API_TOKEN\n2. Add 'git-server' to REQUIRED_ENV_VARS with: GIT_API_TOKEN\n3. Add GIT_API_TOKEN to FORBIDDEN_ENV_VARS for: mcp-server, plan-server, tester-server, proxy, caddy\n4. Add GIT_API_TOKEN to REQUIRED_ENV_VARS for claude-server\n5. Add 'git-server' to REQUIRED_PATHS with: ['/app', '/gitdir']\n6. Add 'git-server' to FORBIDDEN_PATHS with standard secrets: ['/app/.secrets.env', '/app/.cluster_tokens.env']\n7. Do NOT modify test_isolation.py in this task (separate test file, separate task if needed)",
+      "verify": "run_tests passes (python -m pytest test_isolation.py -v)",
+      "done": "verify_isolation.py has git-server role with correct forbidden/required env vars and paths; GIT_API_TOKEN forbidden on all unrelated services; required on claude-server and git-server",
+      "status": "completed"
+    },
+    {
+      "id": "t7",
+      "name": "Update docker-compose.yml to wire claude-server to git-server",
+      "files": [
+        "cluster/docker-compose.yml"
+      ],
+      "action": "Update claude-server service in docker-compose.yml:\n\n1. Add to claude-server environment:\n   - GIT_API_TOKEN=${GIT_API_TOKEN}\n   - GIT_SERVER_URL=https://git-server:8443\n2. Add git-server to claude-server depends_on list\n3. Do NOT remove /workspace or /gitdir mounts from claude-server yet \u2014 that's a separate phase (the old git_mcp.py still needs GIT_DIR and GIT_WORK_TREE env vars during the transition to confirm the REST client works; those can be removed in a follow-up once integration tests pass)\n4. Keep GIT_DIR and GIT_WORK_TREE env vars on claude-server for now (git_mcp.py no longer uses them, but removing mounts is a separate step)",
+      "verify": "docker compose config validates without errors",
+      "done": "claude-server has GIT_API_TOKEN, GIT_SERVER_URL env vars and depends_on git-server",
+      "status": "completed"
+    }
+  ]
+}
