@@ -389,6 +389,41 @@ else
   exit 1
 fi
 
+echo "$(date +'%H:%M:%S') Checking git-server health..."
+GIT_HEALTH=$(docker exec claude-server curl -s -o /dev/null -w "%{http_code}" -k https://git-server:8443/health 2>/dev/null || echo "000")
+if [ "$GIT_HEALTH" = "200" ]; then
+  echo "  ✅ git-server healthy"
+else
+  echo "  ❌ git-server not responding (HTTP $GIT_HEALTH)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking git-server auth rejects bad token..."
+GIT_AUTH=$(docker exec claude-server curl -s -o /dev/null -w "%{http_code}" -k \
+  https://git-server:8443/status \
+  -H "Authorization: Bearer wrong-token" 2>/dev/null || echo "000")
+if [ "$GIT_AUTH" = "401" ]; then
+  echo "  ✅ git-server auth correctly rejects invalid token"
+else
+  echo "  ❌ git-server expected 401 but got $GIT_AUTH"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking git-server REST API responds to valid token..."
+GIT_STATUS_RESP=$(docker exec claude-server curl -s -k \
+  https://git-server:8443/status \
+  -H "Authorization: Bearer $GIT_API_TOKEN" 2>/dev/null || echo "FAIL")
+if echo "$GIT_STATUS_RESP" | grep -q '"output"'; then
+  echo "  ✅ git-server /status returns valid JSON with valid token"
+else
+  echo "  ❌ git-server /status failed with valid token"
+  echo "  Response: $GIT_STATUS_RESP"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
 echo "$(date +'%H:%M:%S') Checking claude-server resource limits..."
 CLAUDE_MEM=$(docker inspect claude-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
 CLAUDE_CPUS=$(docker inspect claude-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
@@ -537,6 +572,74 @@ else
   TESTER_RESOURCE_FAIL=1
 fi
 if [ "$TESTER_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Git-server isolation..."
+
+GIT_VARS_CHECK=$(docker exec git-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY|MCP_API_TOKEN|PLAN_API_TOKEN|TESTER_API_TOKEN)' || true)
+if [ -z "$GIT_VARS_CHECK" ]; then
+  echo "  ✅ git-server env var isolation clean"
+else
+  echo "  ❌ git-server has forbidden env vars:"
+  echo "$GIT_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+GIT_TOKEN_CHECK=$(docker exec git-server env 2>/dev/null | grep -E '^GIT_API_TOKEN=' || true)
+if [ -n "$GIT_TOKEN_CHECK" ]; then
+  echo "  ✅ git-server has GIT_API_TOKEN"
+else
+  echo "  ❌ git-server missing GIT_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+GIT_PLANS_CHECK=$(docker exec git-server ls /plans 2>&1 || true)
+if echo "$GIT_PLANS_CHECK" | grep -q "No such file"; then
+  echo "  ✅ git-server cannot see /plans"
+else
+  echo "  ❌ git-server can see /plans"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking git-server resource limits..."
+GIT_MEM=$(docker inspect git-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+GIT_CPUS=$(docker inspect git-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+GIT_PIDS=$(docker inspect git-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+GIT_CAPS=$(docker inspect git-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+GIT_RESOURCE_FAIL=0
+# mem_limit: 512m = 536870912 bytes
+if [ "$GIT_MEM" = "536870912" ]; then
+  echo "  ✅ git-server mem_limit: 512m"
+else
+  echo "  ❌ git-server mem_limit wrong (got $GIT_MEM, want 536870912)"
+  GIT_RESOURCE_FAIL=1
+fi
+# cpus: 1.0 = 1000000000 NanoCPUs
+if [ "$GIT_CPUS" = "1000000000" ]; then
+  echo "  ✅ git-server cpus: 1.0"
+else
+  echo "  ❌ git-server cpus wrong (got $GIT_CPUS, want 1000000000)"
+  GIT_RESOURCE_FAIL=1
+fi
+if [ "$GIT_PIDS" = "100" ]; then
+  echo "  ✅ git-server pids_limit: 100"
+else
+  echo "  ❌ git-server pids_limit wrong (got $GIT_PIDS, want 100)"
+  GIT_RESOURCE_FAIL=1
+fi
+if echo "$GIT_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ git-server cap_drop: ALL"
+else
+  echo "  ❌ git-server cap_drop missing ALL (got $GIT_CAPS)"
+  GIT_RESOURCE_FAIL=1
+fi
+if [ "$GIT_RESOURCE_FAIL" -eq 1 ]; then
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi
