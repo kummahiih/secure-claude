@@ -145,8 +145,9 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   `plan_server.py`; enforced in `/plan` (create), `/task` (update), and `/block`
   endpoints. 11 unit tests in `TestFieldLengthValidation` cover all fields and
   boundary conditions. Human-review gate deferred as a separate open item.
-- [ ] **RR-15** Validate `request.model` against an allowlist in `server.py`
-  before passing it to the `--model` subprocess flag.
+- [X] **RR-15** ~~Validate `request.model` against an allowlist in `server.py`
+  before passing it to the `--model` subprocess flag.~~ Done (2026-03-30). See RR-15 in THREAT_MODEL.md.
+- [X] **RR-16** ~~Add `max_length` to `QueryRequest.query` and `QueryRequest.model`; add Caddy `request_body` size limit.~~ Done (2026-03-30). `max_length=100_000` on `query`, `max_length=200` on `model` (Pydantic Field); Caddy `:8443` enforces `request_body { max_size 256KB }`. Five unit tests in `TestQueryRequestValidation`.
 - [ ] Tag a release
 
 ### Additional hardening completed (not in original threat model)

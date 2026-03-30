@@ -360,15 +360,11 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 - **Description:** `server.py` passes `request.model` directly to `--model` flag. Shell injection is not possible (subprocess args are a list). However, an attacker with `CLAUDE_API_TOKEN` could specify arbitrary model names, potentially causing errors or unintended API usage.
 - **Status: Fixed** — `ALLOWED_MODELS` frozenset (`claude-sonnet-4-6`, `claude-opus-4-6`, `claude-haiku-4-5-20251001`) defined in `server.py`. `_validate_model()` is called at the top of both `/ask` and `/plan` before any subprocess is spawned; unknown models are rejected with HTTP 400. Five unit tests cover reject/accept/empty/prefix-attack cases.
 
-### RR-16: Unbounded Request Body Size on /ask and /plan *(NEW)*
+### ~~RR-16: Unbounded Request Body Size on /ask and /plan~~ — RESOLVED (2026-03-30)
 - **Severity:** Medium
 - **Likelihood:** Low (requires stolen CLAUDE_API_TOKEN)
-- **Description:** `QueryRequest` has `query: str` and `model: str` with no length constraints. FastAPI has no default body size limit. A very large `query` (e.g., 100 MB) is:
-  1. Held in memory by uvicorn
-  2. Logged at INFO level in full
-  3. Passed as a CLI argument to the `claude` subprocess (Linux `ARG_MAX` ≈ 2 MB)
-  This could exhaust the `claude-server` 4 GB memory limit or trigger subprocess errors.
-- **Recommendation:** Add `query: str = Field(max_length=100_000)` and `model: str = Field(max_length=200)` to `QueryRequest`. Optionally add a Caddy `request_body` size limit directive.
+- **Description:** `QueryRequest` had `query: str` and `model: str` with no length constraints.
+- **Status: Fixed** — `QueryRequest.query` now has `max_length=100_000` and `QueryRequest.model` has `max_length=200` via Pydantic `Field`; oversized payloads are rejected with HTTP 422 before any endpoint logic runs. Caddy `:8443` block additionally enforces `request_body { max_size 256KB }` as a defence-in-depth layer. Five unit tests in `TestQueryRequestValidation` cover boundary conditions.
 
 ### RR-17: Query Content Logged at INFO Level Without Truncation *(NEW)*
 - **Severity:** Low
@@ -457,7 +453,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | ~~P3~~ | ~~RR-12~~ | ~~Upgrade Go servers to TLS 1.3~~ | ✅ Done 2026-03-29 |
 | ~~P3~~ | ~~RR-14~~ | ~~Plan field-length validation~~ | ✅ Done 2026-03-30 |
 | **P3** | **RR-18** | Add `GIT_API_TOKEN` to `_SECRET_TOKENS` in `server.py` | **Open** |
-| **P3** | **RR-16** | Add `max_length` to `QueryRequest.query` and `QueryRequest.model`; add Caddy body size limit | **Open** |
+| ~~P3~~ | ~~RR-16~~ | ~~Add `max_length` to `QueryRequest.query` and `QueryRequest.model`; add Caddy body size limit~~ | ✅ Done 2026-03-30 |
 | **P3** | **RR-8** | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | **Open** |
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
 | P4 | RR-13 | Document test output as trust boundary; add output length cap | Open |
