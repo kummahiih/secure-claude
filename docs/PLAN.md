@@ -139,8 +139,12 @@ Items sourced from [THREAT_MODEL.md](THREAT_MODEL.md) residual risks.
   unit tests verify TLS 1.2 connections are rejected.
 - [ ] **RR-13** Document test output as an explicit trust boundary; consider
   capping `output` length returned by `tester-server`.
-- [ ] **RR-14** Add maximum field-length validation to plan creation in
-  `plan_server.py`; consider a human-review gate before a plan becomes `current`.
+- [X] **RR-14** ~~Add maximum field-length validation to plan creation in
+  `plan_server.py`; consider a human-review gate before a plan becomes `current`.~~
+  Done (2026-03-30). Max-length constants and `_validate_field_lengths()` added to
+  `plan_server.py`; enforced in `/plan` (create), `/task` (update), and `/block`
+  endpoints. 11 unit tests in `TestFieldLengthValidation` cover all fields and
+  boundary conditions. Human-review gate deferred as a separate open item.
 - [ ] **RR-15** Validate `request.model` against an allowlist in `server.py`
   before passing it to the `--model` subprocess flag.
 - [ ] Tag a release

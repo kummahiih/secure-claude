@@ -141,6 +141,7 @@ Enforce boundaries structurally, never by filtering.
 16. Tester subprocess timeout — `tester/main.go` uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT`) with `cmd.WaitDelay = 10s`; timed-out tests return exit code 124
 17. Structured file-access logging — mcp-server logs `FILE_READ: <path> (<n> bytes, sha256=<hex>)` only; no file content written to logs; regression test asserts content never appears in log output
 18. Slash command name hardening — `_expand_slash_command()` applies `os.path.basename()` to strip all directory components before building the file path, then rejects names matching `PATH_BLACKLIST` (`..`, `\0`, shell metacharacters); traversal is structural, not filtered (RR-7, resolved 2026-03-29)
+19. Plan field-length validation — `plan_server.py` enforces maximum lengths on all text fields (`goal`, `name`, `action`, `verify`, `done`, file paths, `reason`, `context`) in the create, update, and block endpoints; oversized payloads are rejected with HTTP 400 identifying the offending field (RR-14, resolved 2026-03-30)
 
 ### Token isolation matrix:
 
