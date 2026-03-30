@@ -187,8 +187,6 @@ services:
     volumes:
       - ./workspace/.git:/gitdir
       - ./workspace:/workspace:ro
-    tmpfs:
-      - /workspace/.git:ro,size=0
     networks:
       - int_net
     mem_limit: 512m
