@@ -1,0 +1,53 @@
+{
+  "id": "plan-20260330-193108",
+  "goal": "Fix RR-16: Add max_length constraints to QueryRequest fields and a Caddy request body size limit to prevent unbounded request body DoS",
+  "status": "completed",
+  "created": "2026-03-30T19:31:08.505065+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Add max_length to QueryRequest in server.py",
+      "files": [
+        "cluster/agent/claude/server.py"
+      ],
+      "action": "Import Field from pydantic and update the QueryRequest class:\n- `query: str = Field(max_length=100_000)`\n- `model: str = Field(max_length=200)`\nThis causes Pydantic to reject oversized payloads with HTTP 422 before they reach endpoint logic.",
+      "verify": "run_tests passes. Manually confirm: `from pydantic import Field` is imported; both fields have max_length constraints.",
+      "done": "QueryRequest.query has max_length=100_000 and QueryRequest.model has max_length=200.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add unit tests for QueryRequest field length validation",
+      "files": [
+        "cluster/agent/claude/test_server.py"
+      ],
+      "action": "Add a new test class `TestQueryRequestValidation` to test_server.py:\n1. Import QueryRequest from server module.\n2. Test that a query of exactly 100_000 chars is accepted (no ValidationError).\n3. Test that a query of 100_001 chars raises ValidationError.\n4. Test that a model of exactly 200 chars is accepted.\n5. Test that a model of 201 chars raises ValidationError.\n6. Test that normal-sized query+model are accepted.\nUse `from pydantic import ValidationError` and construct `QueryRequest(query=..., model=...)` directly.",
+      "verify": "run_tests passes. All new tests in TestQueryRequestValidation pass.",
+      "done": "At least 4 unit tests covering boundary conditions for query and model max_length exist and pass.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Add Caddy request_body size limit on ingress",
+      "files": [
+        "cluster/caddy/Caddyfile"
+      ],
+      "action": "Add a `request_body` directive to the `:8443` ingress block to cap incoming request bodies at 256KB (generous but bounded):\n```\n:8443 {\n    request_body {\n        max_size 256KB\n    }\n    ...\n}\n```\nThis provides a defense-in-depth layer before FastAPI even parses the body.",
+      "verify": "run_tests passes. `caddy validate` succeeds (tested via existing caddy_test.sh). The `request_body` block is present in the :8443 server block.",
+      "done": "Caddyfile :8443 block contains a request_body max_size directive.",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Update CONTEXT.md and THREAT_MODEL.md to mark RR-16 resolved",
+      "files": [
+        "docs/CONTEXT.md",
+        "docs/THREAT_MODEL.md"
+      ],
+      "action": "1. In docs/CONTEXT.md, add a new numbered security principle (item 20 or next available) documenting the request body size limits: Pydantic max_length on QueryRequest + Caddy request_body max_size.\n2. In docs/THREAT_MODEL.md, strike through RR-16 and mark it resolved with today's date. Update the priority table entry from **Open** to \u2705 Done.\n3. In docs/PLAN.md, check off the RR-16 item.",
+      "verify": "grep for 'RR-16' in THREAT_MODEL.md shows it marked as RESOLVED. CONTEXT.md mentions request body size limit.",
+      "done": "RR-16 is documented as resolved in THREAT_MODEL.md, CONTEXT.md, and PLAN.md.",
+      "status": "completed"
+    }
+  ]
+}
