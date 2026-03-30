@@ -88,12 +88,8 @@ services:
       - CURL_CA_BUNDLE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
       - SSL_CERT_FILE=/app/certs/ca.crt
-      - GIT_DIR=/gitdir                              # git_mcp.py uses this for git operations
-      - GIT_WORK_TREE=/workspace                     # worktree is the MCP-visible workspace
       - DOCS_DIR=/docs                               # docs_mcp.py reads from here
     volumes:
-      - ./workspace:/workspace:ro                    # Source files (read-only — writes go through MCP)
-      - ./workspace/.git:/gitdir                     # Git data — follows workspace symlink
       - ./workspace/docs:/docs:ro                    # Project docs — read-only for agent guidance
     networks:
       - int_net
