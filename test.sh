@@ -27,6 +27,8 @@ export CLAUDE_API_TOKEN="${CLAUDE_API_TOKEN:-dummy-claude-token}"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy-anthropic-key}"
 export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-dynamic-key}"
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
+export GIT_API_TOKEN="${GIT_API_TOKEN:-dummy-git-token}"
+export GIT_SERVER_URL="${GIT_SERVER_URL:-https://git-server:8443}"
 
 echo "========================================"
 echo "  SUB-REPOSITORY UNIT TESTS"
