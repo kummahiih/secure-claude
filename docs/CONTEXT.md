@@ -26,19 +26,22 @@ Host / Network
           ├─> proxy:4000 (LiteLLM) ──> caddy-sidecar:8081 ──> Anthropic API
           ├─> MCP stdio servers (inside claude-server):
           │    ├─> files_mcp.py  → HTTPS REST → mcp-server:8443
-          │    ├─> git_mcp.py    → git subprocess (GIT_DIR=/gitdir)
+          │    ├─> git_mcp.py    → HTTPS REST → git-server:8443
           │    ├─> docs_mcp.py   → reads /docs (read-only mount)
           │    ├─> plan_mcp.py   → HTTPS REST → plan-server:8443
           │    └─> tester_mcp.py → HTTPS REST → tester-server:8443
           ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
           │    └─> /workspace (bind mount → active sub-repo)
+          ├─> git-server:8443 (Go REST, git operations)
+          │    ├─> /gitdir (bind mount → workspace/.git)
+          │    └─> /workspace:ro (bind mount → active sub-repo)
           ├─> plan-server:8443 (Python REST, JSON plan files)
           │    └─> /plans (bind mount → plans/)
           └─> tester-server:8443 (Go REST, test runner)
                └─> /workspace:ro (bind mount → active sub-repo)
 ```
 
-### Six containers, all on internal Docker network (int_net):
+### Seven containers, all on internal Docker network (int_net):
 
 | Service | Description | Isolation checks |
 | :--- | :--- | :--- |
@@ -47,6 +50,7 @@ Host / Network
 | proxy | LiteLLM gateway, holds real ANTHROPIC_API_KEY; int_net only, **no direct external network access** (security decision) — all egress routes through caddy-sidecar:8081 | proxy_wrapper.py (4 checks) |
 | mcp-server | Go REST server, os.OpenRoot jail at /workspace | entrypoint.sh (env + .env scan) |
 | plan-server | Python REST server, plan state in /plans | plan_server.py (10 checks) |
+| git-server | Go REST server, git operations (status/diff/add/commit/log/reset) | entrypoint.sh (env + token scan) |
 | tester-server | Go REST server, runs /workspace/test.sh as subprocess | entrypoint.sh (env scan + /workspace check) |
 
 ### MCP tool sets available to Claude Code:
@@ -54,7 +58,7 @@ Host / Network
 | Server | Tools | Transport | Access |
 | :--- | :--- | :--- | :--- |
 | fileserver | read_workspace_file, list_files, create_file, write_file, delete_file, grep_files, replace_in_file, append_file, create_directory | stdio → HTTPS REST | Read/write /workspace via Go fileserver |
-| git | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → git subprocess | Read/write /gitdir, read /workspace; all tools accept optional `submodule_path` to target a submodule; `git_add` auto-detects submodule from file paths |
+| git | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → HTTPS REST | Read/write via git-server:8443; all tools accept optional `submodule_path` to target a submodule; `git_add` auto-detects submodule from file paths |
 | docs | list_docs, read_doc | stdio → local filesystem | Read-only /docs |
 | planner | plan_current, plan_list, plan_complete, plan_block, plan_create, plan_update_task | stdio → HTTPS REST | Read/write plan state via plan-server |
 | tester | run_tests, get_test_results | stdio → HTTPS REST | Run tests and retrieve results via tester-server |
@@ -75,7 +79,7 @@ Host / Network
    `claude --print --dangerously-skip-permissions --output-format json --mcp-config .mcp.json --model <model> --system-prompt <prompt> -- <query>`
 4. Claude Code calls plan_current → gets current task (if any)
 5. Claude Code → mcp-watchdog → files_mcp.py → HTTPS REST → mcp-server:8443
-6. Claude Code → mcp-watchdog → git_mcp.py → git subprocess
+6. Claude Code → mcp-watchdog → git_mcp.py → HTTPS REST → git-server:8443
 7. Claude Code → mcp-watchdog → plan_mcp.py → plan_complete → plan-server:8443
 8. Claude Code → mcp-watchdog → tester_mcp.py → HTTPS REST → tester-server:8443
 9. Claude Code → ANTHROPIC_BASE_URL=https://proxy:4000 → LiteLLM → caddy-sidecar:8081 → Anthropic API
@@ -84,9 +88,14 @@ Host / Network
 
 | Host path | Container path | Mode | Purpose |
 | :--- | :--- | :--- | :--- |
-| ./workspace (→ active sub-repo) | /workspace | ro | Worktree for git operations |
-| ./workspace/.git | /gitdir | rw | Git data for add/commit |
 | active sub-repo/docs | /docs | ro | Project documentation |
+
+### Volume mounts on git-server:
+
+| Host path | Container path | Mode | Purpose |
+| :--- | :--- | :--- | :--- |
+| ./workspace/.git | /gitdir | rw | Git data for add/commit/reset |
+| ./workspace (→ active sub-repo) | /workspace | ro | Worktree for status/diff/add |
 
 ### Volume mounts on mcp-server:
 
@@ -127,7 +136,7 @@ Enforce boundaries structurally, never by filtering.
 11. TLS everywhere — internal CA, all service-to-service over HTTPS; egress to Anthropic uses proper public TLS (no `tls_insecure_skip_verify`) via dedicated Caddy `:8081` listener hardcoded to `api.anthropic.com:443`
 12. Startup isolation checks — every container validates before serving
 13. MCP config as build artifact — .mcp.json baked into image
-14. Non-root containers — UID 1000, cap_drop: ALL on all six containers; mem_limit + cpus + pids_limit on all containers
+14. Non-root containers — UID 1000, cap_drop: ALL on all seven containers; mem_limit + cpus + pids_limit on all containers
 15. Log sanitization — `server.py` subprocess stdout/stderr demoted to DEBUG level; `_redact_secrets()` replaces all known token values with `[REDACTED]` before any log output; configurable via `LOG_LEVEL` env var
 16. Tester subprocess timeout — `tester/main.go` uses `context.WithTimeout` (300s default, configurable via `TEST_TIMEOUT`) with `cmd.WaitDelay = 10s`; timed-out tests return exit code 124
 17. Structured file-access logging — mcp-server logs `FILE_READ: <path> (<n> bytes, sha256=<hex>)` only; no file content written to logs; regression test asserts content never appears in log output
@@ -135,14 +144,15 @@ Enforce boundaries structurally, never by filtering.
 
 ### Token isolation matrix:
 
-| Token | claude-server | proxy | mcp-server | plan-server | tester-server | caddy |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
-| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
+| Token | claude-server | proxy | mcp-server | plan-server | tester-server | git-server | caddy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| GIT_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
 
 ---
 
