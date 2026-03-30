@@ -1,0 +1,52 @@
+{
+  "id": "plan-20260329-213311",
+  "goal": "Create Dockerfile.git, integrate git-server into docker-compose.yml, add to test-integration.sh scans, and write integration tests for git-server REST API",
+  "status": "completed",
+  "created": "2026-03-29T21:33:11.046516+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Create Dockerfile.git",
+      "files": [
+        "cluster/Dockerfile.git"
+      ],
+      "action": "Create a 3-stage Dockerfile following the exact pattern of Dockerfile.mcp and Dockerfile.tester:\n\n**Stage 1 (builder):** `golang:1.26.1-alpine` \u2014 copy `agent/gitserver/main.go` and `agent/gitserver/go.mod`, build to `git-server` binary.\n\n**Stage 2 (signer):** `alpine:3.23.3` with `openssl=3.5.5-r0` \u2014 mount `certs/ca.key` and `certs/ca.crt`, generate `git.key` + `git.crt` signed by internal CA with `subjectAltName=DNS:git-server,DNS:localhost,IP:127.0.0.1` (CN=git-server).\n\n**Stage 3 (runtime):** `alpine:3.23.3` \u2014 install `git` (needed for subprocess calls), create `appgroup:1000` + `appuser:1000`, copy binary as `git-server`, copy certs to `/app/certs/` (git.crt, git.key, ca.crt), `chmod 600` the key, copy `agent/gitserver/entrypoint.sh` to `/app/entrypoint.sh`, USER appuser, EXPOSE 8443, ENTRYPOINT entrypoint.sh, HEALTHCHECK with `pgrep -f git-server`.\n\nNote: the main.go references cert paths `/app/certs/git.crt` and `/app/certs/git.key` \u2014 use those names in the signer stage.",
+      "verify": "run_tests passes; `cd cluster && docker build -f Dockerfile.git .` succeeds",
+      "done": "Dockerfile.git exists, follows the 3-stage pattern, and builds successfully",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Add git-server to docker-compose.yml",
+      "files": [
+        "cluster/docker-compose.yml"
+      ],
+      "action": "Add `git-server` service to docker-compose.yml following the pattern from PLAN_GIT_MCP.md Task 3. Insert it after tester-server:\n\n```yaml\n  git-server:\n    build:\n      context: .\n      dockerfile: Dockerfile.git\n    container_name: git-server\n    user: \"1000:1000\"\n    environment:\n      - GIT_API_TOKEN=${GIT_API_TOKEN}\n      - SSL_CERT_FILE=/app/certs/ca.crt\n      - GIT_DIR=/gitdir\n      - GIT_WORK_TREE=/workspace\n    volumes:\n      - ./workspace/.git:/gitdir\n      - ./workspace:/workspace:ro\n    tmpfs:\n      - /workspace/.git:ro,size=0\n    networks:\n      - int_net\n    mem_limit: 512m\n    cpus: 1.0\n    pids_limit: 100\n    cap_drop:\n      - ALL\n    restart: unless-stopped\n```\n\nAlso add `GIT_API_TOKEN=${GIT_API_TOKEN}` to run.sh token generation (.env and .cluster_tokens.env sections) alongside existing tokens.",
+      "verify": "run_tests passes; `cd cluster && docker-compose config` validates without errors",
+      "done": "git-server service defined in docker-compose.yml; GIT_API_TOKEN generated in run.sh",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Add Dockerfile.git to test-integration.sh scans",
+      "files": [
+        "test-integration.sh"
+      ],
+      "action": "Make these changes to test-integration.sh:\n\n1. Add `GIT_API_TOKEN` to the fake token exports at top: `export GIT_API_TOKEN=\"integration-test-git-token\"`\n\n2. Add `\"Dockerfile.git\"` to the DOCKERFILES array for hadolint linting (line ~45).\n\n3. The govulncheck section for gitserver already exists (lines ~102-106) \u2014 no change needed there.",
+      "verify": "run_tests passes; the DOCKERFILES array includes Dockerfile.git; GIT_API_TOKEN is exported",
+      "done": "Dockerfile.git is linted by hadolint; GIT_API_TOKEN is set for integration tests",
+      "status": "completed"
+    },
+    {
+      "id": "t4",
+      "name": "Write git-server integration tests",
+      "files": [
+        "test-integration.sh"
+      ],
+      "action": "Add git-server integration tests to test-integration.sh in the appropriate sections:\n\n**In section 7/8 (Service Health + Auth Checks)**, after tester-server health check, add:\n```bash\necho \"$(date +'%H:%M:%S') Checking git-server health...\"\nGIT_HEALTH=$(docker exec claude-server curl -s -o /dev/null -w \"%{http_code}\" -k https://git-server:8443/health 2>/dev/null || echo \"000\")\nif [ \"$GIT_HEALTH\" = \"200\" ]; then\n  echo \"  \u2705 git-server healthy\"\nelse\n  echo \"  \u274c git-server not responding (HTTP $GIT_HEALTH)\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n\necho \"$(date +'%H:%M:%S') Checking git-server auth rejects bad token...\"\nGIT_AUTH=$(docker exec claude-server curl -s -o /dev/null -w \"%{http_code}\" -k \\\n  https://git-server:8443/status \\\n  -H \"Authorization: Bearer wrong-token\" 2>/dev/null || echo \"000\")\nif [ \"$GIT_AUTH\" = \"401\" ]; then\n  echo \"  \u2705 git-server auth correctly rejects invalid token\"\nelse\n  echo \"  \u274c git-server expected 401 but got $GIT_AUTH\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n\necho \"$(date +'%H:%M:%S') Checking git-server REST API responds to valid token...\"\nGIT_STATUS_RESP=$(docker exec claude-server curl -s -k \\\n  https://git-server:8443/status \\\n  -H \"Authorization: Bearer $GIT_API_TOKEN\" 2>/dev/null || echo \"FAIL\")\nif echo \"$GIT_STATUS_RESP\" | grep -q '\"output\"'; then\n  echo \"  \u2705 git-server /status returns valid JSON with valid token\"\nelse\n  echo \"  \u274c git-server /status failed with valid token\"\n  echo \"  Response: $GIT_STATUS_RESP\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n```\n\n**In section 8/8 (Isolation Verification)**, after tester-server isolation checks, add:\n```bash\necho \"$(date +'%H:%M:%S') Git-server isolation...\"\n\nGIT_VARS_CHECK=$(docker exec git-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY|MCP_API_TOKEN|PLAN_API_TOKEN|TESTER_API_TOKEN)' || true)\nif [ -z \"$GIT_VARS_CHECK\" ]; then\n  echo \"  \u2705 git-server env var isolation clean\"\nelse\n  echo \"  \u274c git-server has forbidden env vars:\"\n  echo \"$GIT_VARS_CHECK\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n\nGIT_TOKEN_CHECK=$(docker exec git-server env 2>/dev/null | grep -E '^GIT_API_TOKEN=' || true)\nif [ -n \"$GIT_TOKEN_CHECK\" ]; then\n  echo \"  \u2705 git-server has GIT_API_TOKEN\"\nelse\n  echo \"  \u274c git-server missing GIT_API_TOKEN\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n\nGIT_PLANS_CHECK=$(docker exec git-server ls /plans 2>&1 || true)\nif echo \"$GIT_PLANS_CHECK\" | grep -q \"No such file\"; then\n  echo \"  \u2705 git-server cannot see /plans\"\nelse\n  echo \"  \u274c git-server can see /plans\"\n  (cd cluster && docker-compose down 2>/dev/null)\n  exit 1\nfi\n```\n\nAlso add git-server resource limits check following the exact pattern of mcp-server (mem_limit: 512m = 536870912, cpus: 1.0 = 1000000000, pids_limit: 100, cap_drop: ALL).",
+      "verify": "run_tests passes; grep the file for 'git-server' to confirm all test blocks are present",
+      "done": "test-integration.sh has git-server health check, auth rejection test, valid-token API test, env var isolation test, token presence test, filesystem isolation test, and resource limits check",
+      "status": "completed"
+    }
+  ]
+}
