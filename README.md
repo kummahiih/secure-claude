@@ -16,11 +16,14 @@ Host / Network
           │    └─> /workspace (bind mount → active sub-repo)
           ├─> plan-server:8443 (Python REST, plan state)
           │    └─> /plans (bind mount → plans/)
-          └─> tester-server:8443 (Go REST, test runner)
-               └─> /workspace:ro (bind mount → active sub-repo)
+          ├─> tester-server:8443 (Go REST, test runner)
+          │    └─> /workspace:ro (bind mount → active sub-repo)
+          └─> git-server:8443 (REST, git operations)
+               ├─> /workspace:ro (bind mount → active sub-repo)
+               └─> /gitdir (bind mount → active sub-repo .git, rw)
 ```
 
-Six containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](docs/WORKSPACE_INTERFACE.md).
+Seven containers orchestrated by Docker Compose. The `/workspace` mount is swappable — point it at any repo that follows the [workspace interface](docs/WORKSPACE_INTERFACE.md).
 
 ## Sub-Repositories
 
@@ -67,7 +70,7 @@ Full security architecture in [docs/CONTEXT.md](docs/CONTEXT.md). Sub-repos docu
 1. **Credential Isolation** — agent uses ephemeral DYNAMIC_AGENT_KEY, never real ANTHROPIC_API_KEY
 2. **Network Isolation** — claude-server and proxy on int_net only; the proxy has no direct external network access (intentional security boundary — outbound Anthropic API calls are routed through the host network stack, never directly from the proxy container)
 3. **Filesystem Jail** — Go os.OpenRoot at /workspace, traversal blocked at runtime level
-4. **Per-Service Auth** — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server — each token scoped to its own backend
+4. **Per-Service Auth** — CLAUDE_API_TOKEN for ingress; MCP_API_TOKEN for mcp-server, PLAN_API_TOKEN for plan-server, TESTER_API_TOKEN for tester-server, GIT_API_TOKEN for git-server — each token scoped to its own backend
 5. **TLS Everywhere** — internal CA, all service-to-service over HTTPS
 6. **Non-Root Containers** — UID 1000, cap_drop: ALL on all containers; mem_limit + cpus + pids_limit on all containers
 7. **MCP Security Proxy** — mcp-watchdog blocks 40+ attack classes on all JSON-RPC traffic
