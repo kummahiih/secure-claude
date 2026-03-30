@@ -187,8 +187,22 @@ echo "========================================"
 echo "  DOCKER INTEGRATION TESTS"
 echo "========================================"
 
+# Ensure docker-compose.override.yml is removed on exit (handles all exit paths)
+trap 'rm -f cluster/docker-compose.override.yml' EXIT
+
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 5/8: Starting cluster for integration tests..."
+
+# If workspace/.git is a gitfile (submodule), resolve the real git directory
+# and create a compose override so git-server gets a proper /gitdir mount.
+if [ -f cluster/workspace/.git ]; then
+    REAL_GIT_DIR=$(cd cluster/workspace && git rev-parse --absolute-git-dir 2>/dev/null || true)
+    if [ -d "$REAL_GIT_DIR" ]; then
+        printf 'services:\n  git-server:\n    volumes:\n      - %s:/gitdir\n      - ./workspace:/workspace:ro\n' \
+            "$REAL_GIT_DIR" > cluster/docker-compose.override.yml
+        echo "  Workspace is a submodule; resolved real gitdir: $REAL_GIT_DIR"
+    fi
+fi
 
 # Create plans directory if needed
 mkdir -p plans
