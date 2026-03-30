@@ -37,8 +37,6 @@ git-server:8443 (new container)
   │   Mounts:
   │     ./workspace/.git:/gitdir         (rw — for add/commit/reset)
   │     ./workspace:/workspace:ro        (read-only — for status/diff/add)
-  │   tmpfs:
-  │     /workspace/.git:ro,size=0        (shadow .git inside workspace — hook prevention)
   │   Env:
   │     GIT_API_TOKEN
   │   Certs:
@@ -57,7 +55,8 @@ Git operations (`status`, `diff`, `add`) require access to the working tree to c
 
 1. `core.hooksPath=/dev/null` on every git command
 2. `--no-verify` on commits
-3. tmpfs shadow: `/workspace/.git:ro,size=0` — prevents git from finding hooks via the workspace `.git` path (same as mcp-server does today)
+
+No tmpfs shadow needed — `/workspace` is mounted `:ro`, so no hook files can be written there. mcp-server needs the tmpfs shadow because its `/workspace` is read-write.
 
 ### Baseline commit capture
 
@@ -137,8 +136,6 @@ New token `GIT_API_TOKEN` follows the existing per-service pattern:
     volumes:
       - ./workspace/.git:/gitdir            # Git data (rw)
       - ./workspace:/workspace:ro           # Worktree (read-only)
-    tmpfs:
-      - /workspace/.git:ro,size=0           # Shadow .git — hook prevention
     networks:
       - int_net
     mem_limit: 512m
@@ -311,7 +308,7 @@ New token `GIT_API_TOKEN` follows the existing per-service pattern:
 
 ### Neutral
 
-- Hook prevention is unchanged — same three layers (hooksPath, --no-verify, tmpfs shadow).
+- Hook prevention uses two layers (hooksPath, --no-verify) — tmpfs shadow is not needed since `/workspace` is `:ro`.
 - Baseline commit floor enforcement is unchanged — just moved to git-server.
 
 ### Risks
