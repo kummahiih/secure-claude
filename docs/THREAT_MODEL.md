@@ -231,6 +231,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
   `GIT_API_TOKEN` is **not included**. However, `GIT_API_TOKEN` is present in the claude-server process environment (passed to the Claude Code subprocess via `**os.environ`). If the agent echoes the git token in its response text (e.g., via prompt injection or accidental inclusion in a commit message), `_redact_secrets()` will **not** redact it from `DEBUG`-level log output.
 - **Impact:** Medium — GIT_API_TOKEN could appear unredacted in debug logs if `LOG_LEVEL=DEBUG`.
 - **Recommendation:** Import `GIT_API_TOKEN` from `runenv` and add it to `_SECRET_TOKENS`.
+- **Status: Fixed** — GIT_API_TOKEN added to `_SECRET_TOKENS` in `server.py`. Dedicated unit test `test_git_api_token_is_redacted` verifies redaction.
 
 ---
 
@@ -291,7 +292,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - All seven containers: `cap_drop: ALL`, `mem_limit`, `cpus`, `pids_limit`. `caddy-sidecar` and `proxy` additionally have `read_only: true`. `no-new-privileges` deferred (kernel 6.17.0-19 does not support it).
 
 ### Log Sanitization
-- `server.py`: subprocess stdout/stderr at DEBUG level; `_redact_secrets()` redacts known token values with `[REDACTED]` before any log output. (Gap: `GIT_API_TOKEN` not currently included — see RR-18.)
+- `server.py`: subprocess stdout/stderr at DEBUG level; `_redact_secrets()` redacts known token values with `[REDACTED]` before any log output. All service tokens (`CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`) are now included (RR-18 resolved 2026-03-30).
 
 ### Plan Field-length Validation (2026-03-30)
 - `plan_server.py` enforces maximum lengths on all text fields. Oversized payloads rejected with HTTP 400.
@@ -382,7 +383,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
   logger.info(f"Received authenticated query ({len(request.query)} chars): {request.query[:500]!r}...")
   ```
 
-### RR-18: GIT_API_TOKEN Absent from Log Redaction List *(NEW)*
+### ~~RR-18: GIT_API_TOKEN Absent from Log Redaction List~~ — RESOLVED (2026-03-30)
 - **Severity:** Medium
 - **Likelihood:** Low (only manifests at DEBUG log level or if agent echoes token)
 - **Description:** `server.py` builds `_SECRET_TOKENS` from `[CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN]`. `GIT_API_TOKEN` is **not included**, even though it is present in the claude-server process environment and is passed to the Claude Code subprocess via `**os.environ`. If the agent echoes the git token in its response text (e.g., via prompt injection), `_redact_secrets()` will not redact it from DEBUG-level log output.
@@ -406,7 +407,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
 | **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 ✅) | No request audit log (RR-17) | Query content in logs (RR-17) | No rate limit (RR-8); large body (RR-16) | — |
-| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | GIT_API_TOKEN not redacted (RR-18); Env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8); unbounded body (RR-16) | ~~Slash command path traversal (RR-7)~~ ✅ |
+| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | ~~GIT_API_TOKEN not redacted (RR-18)~~ ✅; Env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8); unbounded body (RR-16) | ~~Slash command path traversal (RR-7)~~ ✅ |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses | — | — | — | — |
 | **files_mcp.py** | — | ~~URL param injection (RR-6)~~ ✅ | — | — | — | — |
 | **mcp-server (Go)** | — | — | ~~File content fully logged (RR-5)~~ ✅ | ~~File content in logs (RR-5)~~ ✅ | ~~No resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
@@ -452,7 +453,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: ALL` to all containers~~ | ✅ Done 2026-03-28 |
 | ~~P3~~ | ~~RR-12~~ | ~~Upgrade Go servers to TLS 1.3~~ | ✅ Done 2026-03-29 |
 | ~~P3~~ | ~~RR-14~~ | ~~Plan field-length validation~~ | ✅ Done 2026-03-30 |
-| **P3** | **RR-18** | Add `GIT_API_TOKEN` to `_SECRET_TOKENS` in `server.py` | **Open** |
+| ~~P3~~ | ~~RR-18~~ | ~~Add `GIT_API_TOKEN` to `_SECRET_TOKENS` in `server.py`~~ | ✅ Done 2026-03-30 |
 | ~~P3~~ | ~~RR-16~~ | ~~Add `max_length` to `QueryRequest.query` and `QueryRequest.model`; add Caddy body size limit~~ | ✅ Done 2026-03-30 |
 | **P3** | **RR-8** | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | **Open** |
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
