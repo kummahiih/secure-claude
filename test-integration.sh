@@ -559,10 +559,10 @@ else
   echo "  ❌ tester-server cpus wrong (got $TESTER_CPUS, want 1000000000)"
   TESTER_RESOURCE_FAIL=1
 fi
-if [ "$TESTER_PIDS" = "150" ]; then
-  echo "  ✅ tester-server pids_limit: 150"
+if [ "$TESTER_PIDS" = "1024" ]; then
+  echo "  ✅ tester-server pids_limit: 1024"
 else
-  echo "  ❌ tester-server pids_limit wrong (got $TESTER_PIDS, want 150)"
+  echo "  ❌ tester-server pids_limit wrong (got $TESTER_PIDS, want 1024)"
   TESTER_RESOURCE_FAIL=1
 fi
 if echo "$TESTER_CAPS" | grep -qi "ALL"; then

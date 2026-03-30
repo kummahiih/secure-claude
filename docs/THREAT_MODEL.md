@@ -281,7 +281,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **claude-server:** `cap_drop: ALL`, `mem_limit: 4g`, `cpus: 2.0`, `pids_limit: 200`. Higher limits to accommodate Claude Code subprocess + 5 MCP stdio servers.
 - **mcp-server:** `cap_drop: ALL`, `mem_limit: 512m`, `cpus: 1.0`, `pids_limit: 100`. Go binary is lightweight; 512 MB is generous headroom.
 - **plan-server:** `cap_drop: ALL`, `mem_limit: 256m`, `cpus: 0.5`, `pids_limit: 50`. Minimal Python REST server, smallest limits in the cluster.
-- **tester-server:** `cap_drop: ALL`, `mem_limit: 1g`, `cpus: 1.0`, `pids_limit: 150`. Accommodates Go test compilation in `test.sh`.
+- **tester-server:** `cap_drop: ALL`, `mem_limit: 1g`, `cpus: 1.0`, `pids_limit: 1024`. Accommodates Go test compilation in `test.sh`.
 - **`no-new-privileges` deferred** — kernel 6.17.0-19 does not support it (documented in `HARDENING.md`).
 
 ### CA Certificate Hardening (added 2026-03-27)

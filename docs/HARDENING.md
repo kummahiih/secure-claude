@@ -308,7 +308,7 @@ claude-server runs the Claude Code CLI, which spawns a Node.js process plus up t
 | `cap_drop` | `ALL` | Drop all Linux capabilities |
 | `mem_limit` | `1g` | Bound memory; runs arbitrary `test.sh` which may compile Go code — 1 GB accommodates Go test compilation |
 | `cpus` | `1.0` | Cap CPU for test runs |
-| `pids_limit` | `150` | Fork bomb prevention; test subprocess may spawn compiler + linker child processes |
+| `pids_limit` | `1024` | Fork bomb prevention; test subprocess may spawn compiler + linker child processes |
 
 ### Not applied / deferred
 
