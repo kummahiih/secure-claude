@@ -4,6 +4,10 @@
 
 # --- INGRESS: Access to Agent ---
 :8443 {
+    request_body {
+        max_size 256KB
+    }
+
     tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
 
     reverse_proxy https://claude-server:8000 {
