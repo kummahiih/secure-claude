@@ -1,0 +1,30 @@
+{
+  "id": "plan-20260331-110621",
+  "goal": "Restore explicit subagent-per-task framing to the ask.md system prompt and update TOKEN_USE.md documentation to reflect current state.",
+  "status": "completed",
+  "created": "2026-03-31T11:06:21.568453+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Restore subagent framing in ask.md",
+      "files": [
+        "cluster/agent/prompts/system/ask.md"
+      ],
+      "action": "Expand the two-line subagent description at the top of ask.md into a dedicated '## Architecture' section. Make explicit: (1) Claude is invoked as a subagent by an outer server loop; (2) the server spawns a fresh claude --print session per task \u2014 no context carries over between tasks; (3) each invocation must execute exactly one plan task then stop; (4) output exactly `DONE` (and nothing else) when plan_current returns no active task \u2014 that is the signal the server uses to halt the loop. Keep all existing Workflow and Rules sections intact.",
+      "verify": "Read the updated ask.md and confirm: the header section explicitly names the subagent + outer-loop architecture; the DONE-signaling contract is unambiguous; the Workflow steps are unchanged.",
+      "done": "ask.md contains a clear Architecture section describing the subagent loop, one-task-per-invocation contract, and DONE stop signal, with no other content removed.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Update TOKEN_USE.md documentation",
+      "files": [
+        "docs/TOKEN_USE.md"
+      ],
+      "action": "In the Implementation Tasks table (Section 5), update task #10 note to reflect that the system prompt now explicitly documents the subagent architecture. In the Open Questions section (Section 7), resolve question 3 ('Sub-agent isolation \u2014 how to pass task-specific context') by noting it is handled by the system prompt: each subagent re-reads docs via list_docs/read_doc as instructed in the Workflow, so no special context-passing mechanism is needed. In Section 3.2 Changes to Existing Services, update the claude-server sub-agent row to note the system prompt change.",
+      "verify": "Read the updated TOKEN_USE.md and confirm: task #10 status row is updated, Open Question 3 is resolved with explanation, and the claude-server row in Section 3.2 reflects the prompt change.",
+      "done": "TOKEN_USE.md Open Question 3 is resolved, task #10 is updated, and the architecture description in Section 3.2 matches the restored system prompt.",
+      "status": "completed"
+    }
+  ]
+}
