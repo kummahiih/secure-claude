@@ -25,6 +25,8 @@ set -e
     echo "" && \
     echo "=== claude-server ===" && \
     docker-compose logs --tail 300 claude-server && \
+    echo "=== log-server ===" && \
+    docker-compose logs --tail 100 log-server && \
     echo "" && \
     echo "=== MCP fileserver logs (from Claude Code) ===" && \
     docker exec claude-server sh -c \
