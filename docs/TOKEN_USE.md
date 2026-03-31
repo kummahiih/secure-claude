@@ -1,7 +1,7 @@
 # Planning Document: Token Consumption Modeling Skill & Infrastructure
 
 **Date:** 2026-03-31
-**Status:** Planning
+**Status:** Log service implemented; `/token-model` slash command and remaining optimisations pending
 **Scope:** `/token-model` slash command and supporting infrastructure for LLM token consumption analysis
 
 ---
@@ -91,7 +91,7 @@ The table uses `Open / In Progress / Done` status tracking, matching the threat 
 
 The token model skill requires access to server logs for real session analysis. Currently, logs are only available inside container stdout/stderr and are not queryable by the agent.
 
-**Proposed: `log-server`** — A new MCP service providing structured log queries.
+**Implemented: `log-server`** — A Go REST service providing structured log storage and queries, with a `log_mcp.py` stdio wrapper exposing it as a `logs` MCP tool set inside `claude-server`.
 
 #### Requirements
 
@@ -108,12 +108,14 @@ The token model skill requires access to server logs for real session analysis. 
 
 ```
 claude-server
-  └─ log_mcp.py (new stdio wrapper) ─HTTPS→ log-server:8443 (LOG_API_TOKEN)
+  └─ log_mcp.py (stdio wrapper) ─HTTPS→ log-server:8443 (LOG_API_TOKEN)
 
 Log ingestion:
-  claude-server stdout/stderr ─→ Docker log driver ─→ log-server storage
-  (or: each MCP server writes structured logs to shared log volume)
+  server.py _log_llm_call() ─fire-and-forget daemon thread─→ POST /ingest → log-server
+  (sessions keyed by secrets.token_hex(8) generated per /ask or /plan request)
 ```
+
+Log events are stored as JSONL files under `cluster/logs/<session_id>.jsonl` (host-side bind mount at `/logs` inside the container). The `logs/` directory is `.gitignore`d.
 
 #### MCP Tools
 
@@ -169,33 +171,34 @@ Log ingestion:
 
 ## 5. Implementation Tasks
 
-| # | Task | Files | Dependencies |
-|---|------|-------|-------------|
-| 1 | Create `/token-model` slash command prompt | `cluster/agent/prompts/commands/token-model.md` | None |
-| 2 | Design log-server MCP service (API contract, log event schema) | `cluster/log-server/` (new) | None |
-| 3 | Implement log-server Go service | `cluster/log-server/main.go` | Task 2 |
-| 4 | Create `log_mcp.py` stdio wrapper in claude-server | `cluster/agent/src/log_mcp.py` | Task 3 |
-| 5 | Add structured logging to claude-server | `cluster/agent/src/server.py` | Task 2 (schema) |
-| 6 | Add structured logging to mcp-server, git-server, tester-server | Respective `main.go` files | Task 2 (schema) |
-| 7 | Add log-server to Docker Compose | `docker-compose.yml`, certs, tokens | Tasks 3-4 |
-| 8 | Implement blocking `wait=true` on `get_test_results` | `cluster/tester/main.go` | None |
-| 9 | Implement test output truncation on success | `cluster/tester/main.go` | None |
-| 10 | Add sub-agent-per-task mode to claude-server | `cluster/agent/src/server.py` | None |
+| # | Task | Files | Status |
+|---|------|-------|--------|
+| 1 | Create `/token-model` slash command prompt | `cluster/agent/prompts/commands/token-model.md` | Open |
+| 2 | Design log-server API contract and log event schema | `cluster/log-server/` | ✅ Done |
+| 3 | Implement log-server Go service | `cluster/log-server/main.go` | ✅ Done |
+| 4 | Create `log_mcp.py` stdio wrapper in claude-server | `cluster/agent/claude/log_mcp.py` | ✅ Done |
+| 5 | Add structured LLM-call logging to claude-server | `cluster/agent/claude/server.py` | ✅ Done |
+| 6 | Add log-server to Docker Compose + certs + tokens | `cluster/docker-compose.yml`, `cluster/Dockerfile.log` | ✅ Done |
+| 7 | Unit tests for log-server and log_mcp | `cluster/log-server/main_test.go`, `cluster/agent/claude/tests/test_log_mcp.py` | ✅ Done |
+| 8 | Implement blocking `wait=true` on `get_test_results` | `cluster/tester/main.go` | Open |
+| 9 | Implement test output truncation on success | `cluster/tester/main.go` | Open |
+| 10 | Add sub-agent-per-task mode to claude-server | `cluster/agent/claude/server.py` | Open |
 
 ---
 
 ## 6. Security Considerations
 
-The log-server introduces a new component that must follow existing security patterns:
+The log-server follows all existing security patterns. Implemented controls:
 
-- **Own API token** (`LOG_API_TOKEN`) — added to token isolation matrix
-- **No workspace access** — structurally separated, like plan-server
-- **No secrets access** — verified at startup
-- **Read-only log storage** — log-server reads; writers are the other services
-- **Log content safety** — no file content, no token values, truncated queries (aligns with RR-5, RR-11, RR-17)
+- **Own API token** (`LOG_API_TOKEN`) — present in token isolation matrix; `LOG_API_TOKEN` is forbidden in all other containers
+- **No workspace access** — no `/workspace`, `/gitdir`, or `/plans` mount; structurally separated like `plan-server`
+- **No cross-service secrets** — `entrypoint.sh` rejects startup if any of `ANTHROPIC_API_KEY`, `CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, or `GIT_API_TOKEN` are set
+- **Write-only log storage for other services** — only `claude-server` currently writes via `/ingest`; `log_mcp.py` reads via query endpoints; both paths are auth-gated
+- **Log content safety** — `server.py` emits only token counts, model name, and duration; no prompt content, no file content, no token values reach the log
+- **Session ID sanitisation** — `sanitizeID()` restricts session IDs to `[a-zA-Z0-9_-]`, preventing path traversal in JSONL filenames
 - **`int_net` only** — no external network access
-- **`cap_drop: ALL`**, resource limits, non-root, internal CA TLS — matching all other containers
-- **Startup isolation checks** — verify forbidden env vars and paths
+- **`cap_drop: ALL`**, `mem_limit: 256m`, `cpus: 0.5`, `pids_limit: 50`, UID 1000, internal CA TLS — matching other backend containers
+- **Startup `/logs` check** — `entrypoint.sh` refuses to start if `/logs` directory is not mounted
 
 ---
 

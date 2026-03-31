@@ -15,7 +15,7 @@ The cluster-level guarantees are designed for maximum defense-in-depth:
 * **Credential Isolation:** The agent operates using an ephemeral `DYNAMIC_AGENT_KEY`, never touching your real `ANTHROPIC_API_KEY`.
 * **Network Isolation:** Both `claude-server` and the proxy live exclusively on an internal network (`int_net`). The proxy intentionally has no direct external network access. 
 * **Filesystem Jail:** Workspace access is governed by Go's `os.OpenRoot` at `/workspace`, blocking path traversal attacks at the runtime level.
-* **Per-Service Auth:** Strict token scoping is enforced. `CLAUDE_API_TOKEN` is required for ingress, while individual backend servers require specific tokens (`MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`).
+* **Per-Service Auth:** Strict token scoping is enforced. `CLAUDE_API_TOKEN` is required for ingress, while individual backend servers require specific tokens (`MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `LOG_API_TOKEN`).
 * **Zero-Privilege Compute:** All containers run as non-root (UID 1000) with `cap_drop: ALL`. They are strictly bound by memory, CPU, and PID limits.
 * **Test Isolation:** The `tester-server` runs tests as subprocesses with the workspace mounted as read-only.
 * **TLS Everywhere:** Uses an internal CA to ensure all service-to-service communication occurs over HTTPS.
@@ -74,16 +74,20 @@ Host / Network
           │    └─> /plans (bind mount → plans/)
           ├─> tester-server:8443 (Go REST, test runner)
           │    └─> /workspace:ro (bind mount → active sub-repo)
-          └─> git-server:8443 (REST, git operations)
-               ├─> /workspace:ro (bind mount → active sub-repo)
-               └─> /gitdir (bind mount → active sub-repo .git, rw)
+          ├─> git-server:8443 (Go REST, git operations)
+          │    ├─> /workspace:ro (bind mount → active sub-repo)
+          │    └─> /gitdir (bind mount → active sub-repo .git, rw)
+          └─> log-server:8443 (Go REST, structured session logs)
+               └─> /logs (bind mount → logs/)
 ```
 
 ### Sub-Repositories
 The architecture is modular, split across dedicated sub-repositories containing their own architecture (`docs/CONTEXT.md`) and roadmap (`docs/PLAN.md`) files:
-* **[secure-claude-agent](cluster/agent/):** MCP tool servers (files, git, docs, planner, tester wrappers) + Claude Code integration.
+* **[secure-claude-agent](cluster/agent/):** MCP tool servers (files, git, docs, planner, tester, logs wrappers) + Claude Code integration.
 * **[secure-claude-planner](cluster/planner/):** Plan-server REST API for task state management.
 * **[secure-claude-tester](cluster/tester/):** Tester-server REST API for running workspace tests.
+
+The parent repo also contains `cluster/log-server/` — a Go REST service that stores and queries structured session logs (LLM calls, tool calls, file reads, test runs). It is not a separate submodule because it is infrastructure owned by the parent, like `plan-server`.
 
 ---
 
