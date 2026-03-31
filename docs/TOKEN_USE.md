@@ -72,7 +72,7 @@ Following the pattern from `docs/THREAT_MODEL.md`, the analysis must end with a 
 
 | Priority | Item | Category | Current Waste | Expected Savings | Effort | Status |
 |----------|------|----------|---------------|------------------|--------|--------|
-| P1 | Sub-agent per task (session isolation) | Architecture | ~40-60% context waste | 40-60% total tokens | High | Open |
+| P1 | Sub-agent per task (session isolation) | Architecture | ~40-60% context waste | 40-60% total tokens | High | Done |
 | P1 | Increase test poll delays to 15s/30s | Prompt | 5+ wasted polls/cycle | ~30% per-task | Low | Open |
 | P2 | Make run_tests blocking | Infrastructure | All poll round-trips | 100% poll waste | Medium | Open |
 | P2 | Truncate test output on success | Infrastructure | Full stdout in context | Variable | Low | Open |
@@ -145,7 +145,7 @@ Log events are stored as JSONL files under `cluster/logs/<session_id>.jsonl` (ho
 | **tester-server** | Add `wait=true` parameter to `get_test_results` (blocks server-side until done, with timeout) | Eliminates poll loop — zero wasted round-trips on test waiting |
 | **tester-server** | Truncate output to `{"status": "pass"}` on success; include stderr only on failure (last 50 lines) | Prevents successful test output from bloating context |
 | **claude-server** | Structured JSON logging with token counts per LLM call | Provides data for log-server ingestion |
-| **claude-server** | Sub-agent per task: spawn fresh `claude --print` session per plan task instead of accumulating context | Eliminates cross-task context accumulation (40-60% savings) |
+| **claude-server** | ✅ Sub-agent per task: spawn fresh `claude --print` session per plan task instead of accumulating context | Eliminates cross-task context accumulation (40-60% savings) |
 
 ### 3.3 Prompt Changes
 
@@ -182,7 +182,7 @@ Log events are stored as JSONL files under `cluster/logs/<session_id>.jsonl` (ho
 | 7 | Unit tests for log-server and log_mcp | `cluster/log-server/main_test.go`, `cluster/agent/claude/tests/test_log_mcp.py` | ✅ Done |
 | 8 | Implement blocking `wait=true` on `get_test_results` | `cluster/tester/main.go` | Open |
 | 9 | Implement test output truncation on success | `cluster/tester/main.go` | Open |
-| 10 | Add sub-agent-per-task mode to claude-server | `cluster/agent/claude/server.py` | Open |
+| 10 | Add sub-agent-per-task mode to claude-server | `cluster/agent/claude/server.py` | ✅ Done |
 
 ---
 
