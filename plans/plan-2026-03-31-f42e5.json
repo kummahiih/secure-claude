@@ -1,0 +1,41 @@
+{
+  "id": "plan-20260331-114212",
+  "goal": "Test the task loop system with three hello tasks",
+  "status": "completed",
+  "created": "2026-03-31T11:42:12.490077+00:00",
+  "tasks": [
+    {
+      "id": "t1",
+      "name": "Hello Task 1",
+      "files": [
+        "hello.txt"
+      ],
+      "action": "Create hello.txt and write 'Hello from Task 1!' into it.",
+      "verify": "hello.txt exists and contains 'Hello from Task 1!'",
+      "done": "hello.txt is created with the correct greeting.",
+      "status": "completed"
+    },
+    {
+      "id": "t2",
+      "name": "Hello Task 2",
+      "files": [
+        "hello.txt"
+      ],
+      "action": "Append 'Hello from Task 2!' as a new line in hello.txt.",
+      "verify": "hello.txt contains both Task 1 and Task 2 greetings.",
+      "done": "hello.txt has two lines, the second being 'Hello from Task 2!'.",
+      "status": "completed"
+    },
+    {
+      "id": "t3",
+      "name": "Hello Task 3",
+      "files": [
+        "hello.txt"
+      ],
+      "action": "Append 'Hello from Task 3!' as a new line in hello.txt.",
+      "verify": "hello.txt contains all three greetings on separate lines.",
+      "done": "hello.txt has three lines, the third being 'Hello from Task 3!'.",
+      "status": "completed"
+    }
+  ]
+}
