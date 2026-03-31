@@ -2,7 +2,7 @@
     admin off
 }
 
-# --- INGRESS: Access to Agent ---
+# --- INGRESS: Access to Agent and Log Server ---
 :8443 {
     request_body {
         max_size 256KB
@@ -10,9 +10,19 @@
 
     tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
 
-    reverse_proxy https://claude-server:8000 {
-        transport http {
-            tls_trusted_ca_certs /etc/caddy/certs/ca.crt
+    handle_path /logs/* {
+        reverse_proxy https://log-server:8443 {
+            transport http {
+                tls_trusted_ca_certs /etc/caddy/certs/ca.crt
+            }
+        }
+    }
+
+    handle {
+        reverse_proxy https://claude-server:8000 {
+            transport http {
+                tls_trusted_ca_certs /etc/caddy/certs/ca.crt
+            }
         }
     }
 }
