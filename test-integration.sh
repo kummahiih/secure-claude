@@ -108,6 +108,14 @@ echo "[+] Scanning Go deps (govulncheck)..."
   else
     echo "$GOVULN_GS" | tail -5
   fi
+
+  echo '  Scanning log-server...'
+  GOVULN_LS=$(cd cluster/log-server && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  if echo "$GOVULN_LS" | grep -q 'No vulnerabilities found'; then
+    echo '  ✅ log-server govulncheck clean'
+  else
+    echo "$GOVULN_LS" | tail -5
+  fi
 ) || echo "  ⚠️  govulncheck section failed"
 
 echo "[+] Scanning Python deps (pip-audit)..."
@@ -641,6 +649,109 @@ else
   GIT_RESOURCE_FAIL=1
 fi
 if [ "$GIT_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking log-server health..."
+LOG_HEALTH=$(docker exec claude-server curl -s -o /dev/null -w "%{http_code}" -k https://log-server:8443/health 2>/dev/null || echo "000")
+if [ "$LOG_HEALTH" = "200" ]; then
+  echo "  ✅ log-server healthy"
+else
+  echo "  ❌ log-server not responding (HTTP $LOG_HEALTH)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking log-server auth rejects bad token..."
+LOG_AUTH=$(docker exec claude-server curl -s -o /dev/null -w "%{http_code}" -k \
+  https://log-server:8443/sessions \
+  -H "Authorization: Bearer wrong-token" 2>/dev/null || echo "000")
+if [ "$LOG_AUTH" = "401" ]; then
+  echo "  ✅ log-server auth correctly rejects invalid token"
+else
+  echo "  ❌ log-server expected 401 but got $LOG_AUTH"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking log-server REST API responds to valid token..."
+LOG_SESSIONS_RESP=$(docker exec claude-server curl -s -k \
+  https://log-server:8443/sessions \
+  -H "Authorization: Bearer $LOG_API_TOKEN" 2>/dev/null || echo "FAIL")
+if echo "$LOG_SESSIONS_RESP" | grep -q '"sessions"'; then
+  echo "  ✅ log-server /sessions returns valid JSON with valid token"
+else
+  echo "  ❌ log-server /sessions failed with valid token"
+  echo "  Response: $LOG_SESSIONS_RESP"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Log-server isolation..."
+
+LOG_VARS_CHECK=$(docker exec log-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN|DYNAMIC_AGENT_KEY|MCP_API_TOKEN|PLAN_API_TOKEN|TESTER_API_TOKEN|GIT_API_TOKEN)' || true)
+if [ -z "$LOG_VARS_CHECK" ]; then
+  echo "  ✅ log-server env var isolation clean"
+else
+  echo "  ❌ log-server has forbidden env vars:"
+  echo "$LOG_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+LOG_TOKEN_CHECK=$(docker exec log-server env 2>/dev/null | grep -E '^LOG_API_TOKEN=' || true)
+if [ -n "$LOG_TOKEN_CHECK" ]; then
+  echo "  ✅ log-server has LOG_API_TOKEN"
+else
+  echo "  ❌ log-server missing LOG_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+LOG_WORKSPACE_CHECK=$(docker exec log-server ls /workspace 2>&1 || true)
+if echo "$LOG_WORKSPACE_CHECK" | grep -q "No such file"; then
+  echo "  ✅ log-server cannot see /workspace"
+else
+  echo "  ❌ log-server can see /workspace"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking log-server resource limits..."
+LOG_MEM=$(docker inspect log-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+LOG_CPUS=$(docker inspect log-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+LOG_PIDS=$(docker inspect log-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+LOG_CAPS=$(docker inspect log-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+LOG_RESOURCE_FAIL=0
+# mem_limit: 256m = 268435456 bytes
+if [ "$LOG_MEM" = "268435456" ]; then
+  echo "  ✅ log-server mem_limit: 256m"
+else
+  echo "  ❌ log-server mem_limit wrong (got $LOG_MEM, want 268435456)"
+  LOG_RESOURCE_FAIL=1
+fi
+# cpus: 0.5 = 500000000 NanoCPUs
+if [ "$LOG_CPUS" = "500000000" ]; then
+  echo "  ✅ log-server cpus: 0.5"
+else
+  echo "  ❌ log-server cpus wrong (got $LOG_CPUS, want 500000000)"
+  LOG_RESOURCE_FAIL=1
+fi
+if [ "$LOG_PIDS" = "50" ]; then
+  echo "  ✅ log-server pids_limit: 50"
+else
+  echo "  ❌ log-server pids_limit wrong (got $LOG_PIDS, want 50)"
+  LOG_RESOURCE_FAIL=1
+fi
+if echo "$LOG_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ log-server cap_drop: ALL"
+else
+  echo "  ❌ log-server cap_drop missing ALL (got $LOG_CAPS)"
+  LOG_RESOURCE_FAIL=1
+fi
+if [ "$LOG_RESOURCE_FAIL" -eq 1 ]; then
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi
