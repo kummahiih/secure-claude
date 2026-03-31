@@ -84,6 +84,8 @@ services:
       - TESTER_SERVER_URL=https://tester-server:8443
       - GIT_API_TOKEN=${GIT_API_TOKEN}
       - GIT_SERVER_URL=https://git-server:8443
+      - LOG_API_TOKEN=${LOG_API_TOKEN}
+      - LOG_SERVER_URL=https://log-server:8443
       - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt        # for Node.js/Claude Code
       - CURL_CA_BUNDLE=/app/certs/ca.crt
       - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
@@ -99,6 +101,7 @@ services:
       - tester-server
       - proxy
       - git-server
+      - log-server
     mem_limit: 4g
     cpus: 2.0
     pids_limit: 200
@@ -191,6 +194,26 @@ services:
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  log-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.log
+    container_name: log-server
+    user: "1000:1000"
+    environment:
+      - LOG_API_TOKEN=${LOG_API_TOKEN}
+      - SSL_CERT_FILE=/app/certs/ca.crt
+    volumes:
+      - ./logs:/logs:rw
+    networks:
+      - int_net
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 50
     cap_drop:
       - ALL
     restart: unless-stopped

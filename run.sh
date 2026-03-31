@@ -40,6 +40,7 @@ export PLAN_API_TOKEN=$(openssl rand -hex 32)
 export TESTER_API_TOKEN=$(openssl rand -hex 32)
 export CLAUDE_API_TOKEN=$(openssl rand -hex 32)
 export GIT_API_TOKEN=$(openssl rand -hex 32)
+export LOG_API_TOKEN=$(openssl rand -hex 32)
 
 # Create the standard .env file for Docker Compose
 {
@@ -49,6 +50,7 @@ export GIT_API_TOKEN=$(openssl rand -hex 32)
     echo "TESTER_API_TOKEN=$TESTER_API_TOKEN"
     echo "CLAUDE_API_TOKEN=$CLAUDE_API_TOKEN"
     echo "GIT_API_TOKEN=$GIT_API_TOKEN"
+    echo "LOG_API_TOKEN=$LOG_API_TOKEN"
 } > .env
 
 # Also keep the export-style file for query.sh compatibility
@@ -59,10 +61,11 @@ export GIT_API_TOKEN=$(openssl rand -hex 32)
     echo "export TESTER_API_TOKEN=\"$TESTER_API_TOKEN\""
     echo "export CLAUDE_API_TOKEN=\"$CLAUDE_API_TOKEN\""
     echo "export GIT_API_TOKEN=\"$GIT_API_TOKEN\""
+    echo "export LOG_API_TOKEN=\"$LOG_API_TOKEN\""
 } > .cluster_tokens.env
 
 # Ensure directories exist
-mkdir -p cluster/certs cluster/workspace
+mkdir -p cluster/certs cluster/workspace cluster/logs
 
 # 4. Generate the Root Certificate Authority (CA)
 if [ ! -f cluster/certs/ca.crt ]; then

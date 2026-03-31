@@ -29,6 +29,7 @@ export PLAN_API_TOKEN="integration-test-plan-token"
 export TESTER_API_TOKEN="integration-test-tester-token"
 export CLAUDE_API_TOKEN="integration-test-Claude-token"
 export GIT_API_TOKEN="integration-test-git-token"
+export LOG_API_TOKEN="integration-test-log-token"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
 export DYNAMIC_AGENT_KEY="dummy-dynamic-key"
 
@@ -43,7 +44,7 @@ echo "[$(date +'%H:%M:%S')] 1/8: Validating Caddy Edge Router..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 2/8: Lint Dockerfiles (Hadolint)..."
-DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan" "Dockerfile.tester" "Dockerfile.git")
+DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan" "Dockerfile.tester" "Dockerfile.git" "Dockerfile.log")
 (
   set +e
   for df in "${DOCKERFILES[@]}"; do

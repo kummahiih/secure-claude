@@ -1,0 +1,49 @@
+# Dockerfile.log — Log server for structured session log storage and queries
+#
+# Three-stage pattern matching other Go services (Dockerfile.git, Dockerfile.mcp):
+#   Stage 1: Build Go binary
+#   Stage 2: Sign TLS certificate with internal CA
+#   Stage 3: Runtime image
+
+# Stage 1: Go Builder
+FROM golang:1.26.1-alpine AS builder
+WORKDIR /app
+COPY log-server/main.go log-server/go.mod ./
+RUN go build -o log-server main.go
+
+# Stage 2: Certificate Signer
+FROM alpine:3.23.3 AS signer
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out log.key 2048 && \
+    openssl req -new -key log.key -out log.csr -subj "/CN=log-server" && \
+    echo "subjectAltName=DNS:log-server,DNS:localhost,IP:127.0.0.1" > log.ext && \
+    openssl x509 -req -in log.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out log.crt -days 365 -sha256 -extfile log.ext
+
+# Stage 3: Runtime
+FROM alpine:3.23.3
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -S appuser
+
+WORKDIR /app
+COPY --from=builder /app/log-server .
+
+# Copy internal identity
+COPY --from=signer --chown=appuser:appgroup /certs/log.crt /app/certs/log.crt
+COPY --from=signer --chown=appuser:appgroup /certs/log.key /app/certs/log.key
+COPY --chown=appuser:appgroup ./certs/ca.crt /app/certs/ca.crt
+
+RUN chmod 600 /app/certs/log.key
+
+COPY --chown=appuser:appgroup log-server/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+USER appuser
+EXPOSE 8443
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "log-server" || exit 1
