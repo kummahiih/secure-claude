@@ -145,7 +145,7 @@ Log events are stored as JSONL files under `cluster/logs/<session_id>.jsonl` (ho
 | **tester-server** | Add `wait=true` parameter to `get_test_results` (blocks server-side until done, with timeout) | Eliminates poll loop — zero wasted round-trips on test waiting |
 | **tester-server** | Truncate output to `{"status": "pass"}` on success; include stderr only on failure (last 50 lines) | Prevents successful test output from bloating context |
 | **claude-server** | Structured JSON logging with token counts per LLM call | Provides data for log-server ingestion |
-| **claude-server** | ✅ Sub-agent per task: spawn fresh `claude --print` session per plan task instead of accumulating context | Eliminates cross-task context accumulation (40-60% savings) |
+| **claude-server** | ✅ Sub-agent per task: spawn fresh `claude --print` session per plan task instead of accumulating context. System prompt (`ask.md`) explicitly documents the subagent-per-task architecture and instructs each subagent to re-read docs via `list_docs`/`read_doc` at session start. | Eliminates cross-task context accumulation (40-60% savings) |
 
 ### 3.3 Prompt Changes
 
@@ -182,7 +182,7 @@ Log events are stored as JSONL files under `cluster/logs/<session_id>.jsonl` (ho
 | 7 | Unit tests for log-server and log_mcp | `cluster/log-server/main_test.go`, `cluster/agent/claude/tests/test_log_mcp.py` | ✅ Done |
 | 8 | Implement blocking `wait=true` on `get_test_results` | `cluster/tester/main.go` | Open |
 | 9 | Implement test output truncation on success | `cluster/tester/main.go` | Open |
-| 10 | Add sub-agent-per-task mode to claude-server | `cluster/agent/claude/server.py` | ✅ Done |
+| 10 | Add sub-agent-per-task mode to claude-server; restore explicit subagent architecture framing to `ask.md` system prompt | `cluster/agent/claude/server.py`, `cluster/agent/prompts/ask.md` | ✅ Done |
 
 ---
 
@@ -206,5 +206,5 @@ The log-server follows all existing security patterns. Implemented controls:
 
 1. **Log ingestion mechanism** — Docker log driver → shared volume, or each service writes directly to a shared log volume? Direct writes are simpler but create a shared mount.
 2. **Log retention** — How many sessions to retain? Disk budget?
-3. **Sub-agent isolation** — When spawning fresh sessions per task, how to pass task-specific context without re-reading all docs? Pre-populate a minimal context payload?
+3. ~~**Sub-agent isolation** — When spawning fresh sessions per task, how to pass task-specific context without re-reading all docs? Pre-populate a minimal context payload?~~ **Resolved:** The `ask.md` system prompt instructs each subagent to call `list_docs`/`read_doc` at the start of its session (step 3 of the Workflow). No special context-passing mechanism is needed — each subagent self-bootstraps from the project docs on every run.
 4. **Blocking test API** — Should `wait=true` be the default, or opt-in? If default, what's the timeout before fallback to async?
