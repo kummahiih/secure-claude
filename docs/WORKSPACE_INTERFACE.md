@@ -159,9 +159,63 @@ The tester-server container mounts `/workspace:ro` and executes `test.sh` as a
 subprocess when triggered via `POST /run`. The agent accesses this through the
 tester MCP tools (`run_tests`, `get_test_results`).
 
-The tester container includes Go, Python, pytest, and common test dependencies
-pre-installed. Tests run as the `appuser` (UID 1000) with no network access
-beyond the internal Docker network.
+**`test.sh` runs inside the tester-server container, not on the host.** It has
+no Docker socket, no network access beyond the internal Docker network, and no
+access to secrets. The script runs as `appuser` (UID 1000).
+
+### Pre-installed tools in Dockerfile.tester
+
+| Category | Tools / Versions |
+| :--- | :--- |
+| Base image | `python:3.12-slim` (Debian-based) |
+| Go | 1.26.1 — `go`, `gofmt` available on `PATH` |
+| Python | 3.12 — `python`, `pip` |
+| pytest | 8.3.4 (+ pytest-asyncio 1.3.0) |
+| Python libraries | fastapi, uvicorn, pydantic, requests, certifi, mcp, mcp-watchdog |
+| System packages | bash, ca-certificates, curl, tar, gcc, git, libc6-dev |
+
+**Not installed:** Node.js/npm, Ruby, Rust, Java, .NET, make, Docker,
+govulncheck, pip-audit, hadolint. Security-scan tools are intentionally absent
+(they require network access; they run in `test-integration.sh` instead).
+
+### Extending Dockerfile.tester for your project
+
+If `test.sh` requires a tool that is not in the list above (for example Node.js
+or an extra pip package), you must add an install step to
+`cluster/Dockerfile.tester` in the **Stage 3 (Runtime)** section and rebuild
+the image.
+
+**Example — adding Node.js 22 and an npm package:**
+
+```dockerfile
+# Stage 3: Runtime with test tooling
+FROM python:3.12-slim
+...
+# Add Node.js for JavaScript tests
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g jest@29
+```
+
+**Example — adding an extra Python package:**
+
+```dockerfile
+# Append to tester/requirements.txt instead of inline RUN pip install:
+httpx==0.28.0
+```
+
+Then rebuild and restart the tester-server container:
+
+```bash
+docker compose build tester-server
+docker compose up -d tester-server
+```
+
+> **Warning:** Changes to `Dockerfile.tester` require rebuilding the
+> tester-server image before the new tool is available to `test.sh`. Forgetting
+> to rebuild is the most common cause of "command not found" failures in the
+> tester container.
 
 ## Mounting the Parent Repo as Workspace
 
