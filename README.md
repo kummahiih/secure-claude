@@ -48,6 +48,8 @@ Set up the environment and verify unit tests (no Docker or secrets required for 
 ./test.sh
 ```
 
+> **Note:** `test.sh` in each workspace sub-repo runs **inside the `tester-server` container** (built from `cluster/Dockerfile.tester`). The container pre-installs Go 1.26 and Python 3.12/pytest. If your project's tests require additional runtimes (e.g. Node.js, Ruby), you must add install steps to `Dockerfile.tester` and rebuild the image (`docker compose build tester-server`). See [docs/WORKSPACE_INTERFACE.md](docs/WORKSPACE_INTERFACE.md) for the full contract and extension guide.
+
 **4. Run the Cluster and Execute**
 Start the infrastructure, create a plan, and unleash the agent.
 ```bash
