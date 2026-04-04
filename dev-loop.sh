@@ -43,6 +43,32 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
   echo "[$(date +'%H:%M:%S')] Iteration $ITERATION / $MAX_ITERATIONS"
   echo "============================================================"
 
+  # -------------------------------------------------------------------------
+  # 3a. Pre-check: skip query.sh if the plan is already exhausted
+  # -------------------------------------------------------------------------
+  PRE_LATEST=$(ls -t plans/plan-*.json 2>/dev/null | head -1)
+  if [ -n "$PRE_LATEST" ]; then
+    PRE_STATUS=$(python3 - "$PRE_LATEST" <<'PYEOF'
+import json, sys
+plan = json.load(open(sys.argv[1]))
+top_status = plan.get("status", "")
+if top_status == "completed":
+    print("completed")
+    sys.exit(0)
+# No pending/current task?
+has_active = any(t.get("status") not in ("completed", "blocked") for t in plan.get("tasks", []))
+if not has_active:
+    print("exhausted")
+    sys.exit(0)
+print("in_progress")
+PYEOF
+    )
+    if [ "$PRE_STATUS" = "completed" ] || [ "$PRE_STATUS" = "exhausted" ]; then
+      echo "[$(date +'%H:%M:%S')] ✓ Plan already completed — no further iterations needed."
+      exit 0
+    fi
+  fi
+
   # Build the prompt for the agent
   PROMPT='Call plan_current to get the current task from the active plan. Read every file listed in the task using the fileserver tools, then carry out the work described in the action field. After making any code change, call run_tests followed by get_test_results to verify the tests pass; if tests fail, fix the failures before proceeding. When the verify criteria are satisfied and the done condition is met, call plan_complete with the current task id. If you encounter a blocker you cannot resolve on your own, call plan_block with a clear reason describing what is needed.'
 
