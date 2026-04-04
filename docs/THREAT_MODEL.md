@@ -1,6 +1,6 @@
 # Threat Model: secure-claude
 
-**Date:** 2026-03-30 (updated 2026-03-30 — full refresh)
+**Date:** 2026-04-04 (updated 2026-04-04 — full refresh; log-server added as 8th service)
 **Scope:** secure-claude cluster — hardened containerised environment for running Claude Code as an autonomous AI agent
 **Methodology:** STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)
 **Classification:** Internal Engineering Review
@@ -18,11 +18,13 @@
 | `PLAN_API_TOKEN` | High — plan-server auth | High | High | `claude-server`, `plan-server` |
 | `TESTER_API_TOKEN` | High — tester-server auth | High | High | `claude-server`, `tester-server` |
 | `GIT_API_TOKEN` | High — git-server auth | High | High | `claude-server`, `git-server` |
+| `LOG_API_TOKEN` | Medium — log-server auth; grants read access to full session audit trail | High | Medium | `claude-server`, `log-server` |
 | TLS CA key (`ca.key`) | Critical — can sign arbitrary certs | Critical | Low (used only at build) | Host `cluster/certs/ca.key` (640 perms) |
 | TLS leaf certs/keys | High — MITM if stolen | High | Medium | Per-container `/app/certs/` |
 | `/workspace` source code | Medium — may contain business logic | Critical — agent commits changes | High | Host bind mount → `mcp-server` (rw), others (ro) |
 | Git history (`.git`) | Medium | Critical — commits are permanent | High | Host `workspace/.git` → `/gitdir` in `git-server` |
 | Plan state (`/plans`) | Low | High — directs agent work | High | Host `plans/` → `plan-server` |
+| Session logs (`/logs`) | Medium — metadata: tool calls, file paths, token counts, timing | High — audit trail integrity | Medium | Host `logs/` → `log-server` (rw) |
 | Test output | Low | High — misleading output could cause bad commits | Medium | In-memory, `tester-server` |
 | System prompts (`/app/prompts/`) | High — defines agent behaviour | Critical — modification changes agent goals | Medium | Baked into `claude-server` image, root-owned |
 | Slash commands (`~/.claude/commands/`) | Medium | High | Medium | Baked into `claude-server` image, root-owned |
@@ -54,6 +56,7 @@
   │    │                  │ tester_mcp.py → tester-server:8443  │
   │    │                  │ git_mcp.py → git-server:8443        │
   │    │                  │ docs_mcp.py → /docs read-only       │
+  │    │                  │ log_mcp.py → log-server:8443        │
   │    │                  └──────────────────────────┘          │
   │    │                                                        │
   │  [caddy-sidecar :8081]  ◄──────────────────────────────────┘
@@ -65,9 +68,10 @@
 [plan-server :8443]    /plans only, no workspace/git/secrets
 [tester-server :8443]  /workspace:ro, no git/plans/secrets
 [git-server :8443]     /gitdir:rw, /workspace:ro
+[log-server :8443]     /logs:rw, no workspace/git/plans/secrets
 
 [Host ↔ Container]
-  - Docker volume mounts (workspace rw, git rw, plans rw, certs rw)
+  - Docker volume mounts (workspace rw, git rw, plans rw, logs rw, certs rw)
   - No Docker socket inside any container
   - No privileged containers
 ```
@@ -82,12 +86,14 @@
 | claude-server → git-server | Bearer GIT_API_TOKEN, TLS + internal CA |
 | claude-server → plan-server | Bearer PLAN_API_TOKEN, TLS + internal CA |
 | claude-server → tester-server | Bearer TESTER_API_TOKEN, TLS + internal CA |
+| claude-server → log-server | Bearer LOG_API_TOKEN, TLS + internal CA |
 | MCP stdio → Go/REST backends | mcp-watchdog intercepts all JSON-RPC before forwarding |
 | Agent subprocess → filesystem | `/workspace` mounted ro in claude-server; writes only via mcp-server's os.OpenRoot jail |
 | claude-server → Anthropic | DYNAMIC_AGENT_KEY only (not real key); route via proxy (int_net only) → caddy-sidecar:8081 → api.anthropic.com |
 | proxy → Internet | **No direct access.** Proxy is int_net only; egress exclusively via caddy-sidecar:8081, hardcoded to api.anthropic.com:443 |
 | Host → container | UID 1000, no Docker socket, `cap_drop: ALL` on all containers |
 | plan-server ↔ workspace | Structurally separated — plan-server has no `/workspace` mount |
+| log-server ↔ workspace/git/plans | Structurally separated — log-server has no `/workspace`, `/gitdir`, or `/plans` mount |
 
 ---
 
@@ -118,12 +124,12 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Attack:** Exploit kernel vulnerability, Docker breakout via mounted socket, or privileged container.
 - **Prerequisites:** No Docker socket is mounted. No `--privileged`. UID 1000. All containers have `cap_drop: ALL`.
 - **Impact:** Host compromise; access to `.secrets.env` and real API key.
-- **Residual risk:** Low — `cap_drop: ALL` covers all seven containers.
+- **Residual risk:** Low — `cap_drop: ALL` covers all eight containers.
 
 #### Network Segmentation Bypass
 - **Attack:** Compromise `caddy-sidecar` (which sits on both `ext_net` and `int_net`) to pivot to internal services.
 - **Prerequisites:** RCE in Caddy or its config. Config is mounted read-only. Caddy runs as non-root with `cap_drop: ALL`, `read_only: true`, `pids_limit: 100`.
-- **Impact:** Direct access to `mcp-server`, `plan-server`, `tester-server` at HTTPS layer. Still requires per-service token for auth.
+- **Impact:** Direct access to `mcp-server`, `plan-server`, `tester-server`, `log-server` at HTTPS layer. Still requires per-service token for auth.
 
 #### Volume Mount Traversal
 - **Attack:** Abuse the git gitdir mount (`./workspace/.git:/gitdir`) — if `workspace` is a symlink pointing to a sensitive directory, `/gitdir` could expose unexpected content.
@@ -131,7 +137,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Impact:** Agent git operations touching unexpected content.
 
 #### Environment Variable Leakage
-- **Attack:** `server.py` does `env={**os.environ, ...}` when spawning Claude Code, passing all parent env vars — including `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `CLAUDE_API_TOKEN` — into the Claude Code subprocess. Any code Claude Code spawns inherits these.
+- **Attack:** `server.py` does `env={**os.environ, ...}` when spawning Claude Code, passing all parent env vars — including `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `LOG_API_TOKEN`, `CLAUDE_API_TOKEN` — into the Claude Code subprocess. Any code Claude Code spawns inherits these.
 - **Impact:** An adversarial MCP server injected by prompt injection could read these env vars. Claude Code may also echo them in conversation output.
 - **Note:** This is by design (MCP stdio wrappers need the tokens), but the blast radius is that all service tokens are in the subprocess environment simultaneously.
 
@@ -176,8 +182,14 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 #### Token Exfiltration via Tool Calls
 - **Attack:** Agent is instructed (via prompt injection) to call `grep_files` targeting secret markers in code and write results to a file or embed them in a commit message.
-- **Specific risk:** All service tokens (`MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `CLAUDE_API_TOKEN`) are in `os.environ` of the Claude Code subprocess via `env={**os.environ, ...}` in `server.py`.
+- **Specific risk:** All service tokens (`MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `LOG_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `CLAUDE_API_TOKEN`) are in `os.environ` of the Claude Code subprocess via `env={**os.environ, ...}` in `server.py`.
 - **Exfiltration channel:** Agent writes content to `/workspace` via `write_file`; committed to git history and accessible from host mount. Network exfiltration is blocked — egress locked to `api.anthropic.com`. Covert-channel encoding in API request bodies remains a theoretical risk.
+
+#### Log Exfiltration via log_mcp Tools
+- **Attack:** Agent is instructed (via prompt injection) to call `list_sessions` and `query_logs`, harvesting session metadata (tool calls, file paths accessed, timing data) and embedding it in workspace files or commit messages.
+- **Prerequisites:** Agent already has legitimate access to log_mcp tools. Prompt injection redirects use.
+- **Impact:** Session audit trail exposed; patterns of prior operation (which files were accessed, what tasks were run, token consumption) revealed through git history.
+- **Note:** Log content does not include file bodies (structural constraint), but file paths and tool call names are present and may be sensitive.
 
 #### Recursive Self-Modification
 - **Agent's `/app/` in claude-server** cannot be reached by `mcp-server` (different containers). However, the agent can modify `docs/CONTEXT.md`, `docs/PLAN.md`, and workspace source files — shaping its own future context and instructions.
@@ -193,45 +205,37 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 
 #### Privilege Escalation Between Token Scopes
 - **Status (RR-4, resolved 2026-03-28):** Each backend now has its own token. Compromise of one token no longer grants access to other services.
-- **Residual:** `claude-server` holds all four service tokens simultaneously. A token exfiltration from claude-server still exposes all four, but blast radius per token is bounded to a single backend.
+- **Residual:** `claude-server` holds all service tokens simultaneously. A token exfiltration from claude-server still exposes all tokens, but blast radius per token is bounded to a single backend.
 
 #### Bypass of Token Validation
 - All token comparisons use `secrets.compare_digest` (Python) or `subtle.ConstantTimeCompare` (Go). All services call `log.Fatal` on empty token at startup. No bypass risk identified.
+
+#### LOG_API_TOKEN Missing from proxy and caddy Isolation Checks (NEW — RR-19)
+- **Attack:** `LOG_API_TOKEN` is absent from `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. If `LOG_API_TOKEN` were to leak into the `proxy` or `caddy` container environments (e.g., via a misconfigured `docker-compose.yml`), startup isolation checks would not detect it.
+- **Impact:** Confidentiality of LOG_API_TOKEN slightly weakened — a compromised proxy or caddy could read it from env and query session logs from log-server. Log-server is on `int_net` and requires the token, limiting the direct blast radius.
+- **Severity:** Low (requires misconfiguration AND container compromise).
+- **Recommendation:** Add `LOG_API_TOKEN` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`.
 
 ---
 
 ### 4.4 New / Previously Untracked Vectors
 
-#### RR-16: Unbounded Request Body Size on /ask and /plan
-- **Attack:** An authenticated caller submits a POST with a very large `query` field (e.g., 100 MB of text). FastAPI has no default body size limit. The full string is:
-  1. Held in memory by FastAPI/uvicorn
-  2. Logged at INFO level: `logger.info(f"Received authenticated query: {request.query}...")`
-  3. Passed as a CLI argument to the `claude` subprocess (`-- <query>`)
-- **Impact:** Memory exhaustion in `claude-server` (which has a 4 GB mem_limit); log volume explosion; potential subprocess argument size limit error (Linux `ARG_MAX` ≈ 2 MB).
+#### RR-20: Session Log Data Retention — No Rotation or TTL Policy
+- **Attack / Scenario:** JSONL log files in `/logs` accumulate indefinitely with no documented rotation, archival, or deletion policy. Over time, `log-server` stores the full metadata history of every agent session: tool calls made, file paths accessed, LLM token counts and timing, session IDs.
+- **Impact:**
+  - **Confidentiality:** A host-level compromise (TA-5) exposes all historical session metadata. While file content is never logged, the access patterns (which files were read repeatedly, which tasks ran, what models were used) can leak architectural and operational intelligence.
+  - **Availability:** Unbounded log growth can fill the host disk partition, degrading all services sharing the same storage.
 - **Severity:** Medium
-- **Recommendation:** Add a `max_length` constraint on the `query` and `model` fields in `QueryRequest` (Pydantic `Field(max_length=N)`) and/or a Caddy body size limit directive.
+- **Recommendation:**
+  1. Document a log retention policy (e.g., 30-day TTL).
+  2. Add a log rotation mechanism to `log-server` (e.g., a configurable `LOG_RETENTION_DAYS` env var that deletes or archives JSONL files on startup or via a daily cron within the container).
+  3. Set a host-level disk quota on the `./logs` mount or use a separate volume with a size cap.
 
-#### RR-17: Query Content Logged at INFO Level Without Truncation
-- **Attack:** The full user query is logged at `INFO` level unconditionally (`logger.info(f"Received authenticated query: {request.query}...")`). Unlike subprocess stdout (which was moved to DEBUG in RR-11), the *input* query is always logged.
-- **Scenarios:**
-  - A legitimate user accidentally includes a secret or PII in their query string — it is stored permanently in logs.
-  - A large adversarial query fills log storage.
-  - An adversary with log read access (TA-5) sees the full query content of every invocation.
-- **Impact:** Low–Medium (depends on log storage security and query content sensitivity).
-- **Recommendation:** Truncate the logged query to a maximum length (e.g., 500 characters) at INFO level; log the full query at DEBUG level.
-
-#### RR-18: GIT_API_TOKEN Absent from Log Redaction List
-- **Description:** `server.py` builds `_SECRET_TOKENS` from:
-  ```python
-  _SECRET_TOKENS = [
-      t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN]
-      if t
-  ]
-  ```
-  `GIT_API_TOKEN` is **not included**. However, `GIT_API_TOKEN` is present in the claude-server process environment (passed to the Claude Code subprocess via `**os.environ`). If the agent echoes the git token in its response text (e.g., via prompt injection or accidental inclusion in a commit message), `_redact_secrets()` will **not** redact it from `DEBUG`-level log output.
-- **Impact:** Medium — GIT_API_TOKEN could appear unredacted in debug logs if `LOG_LEVEL=DEBUG`.
-- **Recommendation:** Import `GIT_API_TOKEN` from `runenv` and add it to `_SECRET_TOKENS`.
-- **Status: Fixed** — GIT_API_TOKEN added to `_SECRET_TOKENS` in `server.py`. Dedicated unit test `test_git_api_token_is_redacted` verifies redaction.
+#### RR-21: Silent Log Drops — Incomplete Audit Trail
+- **Attack / Scenario:** `_emit_log_event()` in `server.py` runs in a daemon thread with fire-and-forget semantics. If `log-server` is unavailable (crashed, restarting, overloaded), the `requests.post` raises an exception that is caught and logged only at `WARNING` level — the LLM call event is silently discarded. A malicious actor who can make `log-server` unavailable (e.g., via DoS targeting that one container, RR-8 style) can cause agent sessions to run without being recorded.
+- **Impact:** Loss of audit trail integrity; security-relevant events (tool calls, file writes, commits) go unrecorded. This undermines the repudiation defense the logging system is intended to provide.
+- **Severity:** Low (fire-and-forget is a deliberate design tradeoff; log-server has its own `pids_limit` and resource caps; log events are supplementary to git history).
+- **Recommendation:** Document that git commit history is the primary audit trail and log-server is supplementary. Optionally add a counter of dropped log events exposed at `/health` or in `claude-server` metrics.
 
 ---
 
@@ -244,6 +248,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 ### Network Isolation
 - `int_net` is `internal: true`. Only `caddy-sidecar` spans both networks.
 - `proxy` is `int_net` only — no direct internet access since 2026-03-27.
+- `log-server` is `int_net` only; no external routing.
 
 ### Filesystem Jail (Go os.OpenRoot)
 - `mcp-server/main.go` calls `os.OpenRoot("/workspace")` at startup. All file operations use this root object. Go 1.24+ provides kernel-level jail enforcement.
@@ -261,19 +266,24 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - All MCP stdio servers wrapped: `"command": "mcp-watchdog"` intercepting JSON-RPC, blocking 40+ attack classes.
 
 ### Startup Isolation Checks
-- `verify_isolation.py` performs 26 checks for `claude-server`. All containers verify forbidden/required env vars.
+- `verify_isolation.py` performs checks for all 8 container roles (claude-server, mcp-server, plan-server, tester-server, proxy, caddy, git-server, log-server). All containers verify forbidden/required env vars.
 
 ### Prompt Immutability
 - `/app/prompts/` and `/home/appuser/.claude/commands/` owned by `root:root`, mode `444`/`555`. UID 1000 agent cannot modify them.
 
 ### Non-root Containers
-- All seven containers run as UID 1000 with `cap_drop: ALL`.
+- All eight containers run as UID 1000 with `cap_drop: ALL`.
 
 ### Read-only Mounts
 - `/workspace` mounted ro in `claude-server` and `tester-server`. `/docs` mounted ro in `claude-server`. Caddyfile and proxy config mounted ro.
 
 ### Plan and Tester Isolation
 - `plan-server` has no `/workspace`, `/gitdir`, or secrets. `tester-server` has `/workspace:ro` only.
+
+### Log Server Structural Isolation
+- `log-server` has no access to `/workspace`, `/gitdir`, `/plans`, or other service tokens. `LOG_API_TOKEN` is isolated exclusively to `log-server` and `claude-server`.
+- Log writes from `claude-server` are fire-and-forget daemon threads — failures non-fatal (availability tradeoff documented).
+- Structural logging constraint: only metadata is stored (session_id, event_type, token counts, duration, file paths/SHA256); no file content ever enters log storage.
 
 ### TLS Everywhere (Internal)
 - Internal CA generated fresh on each `run.sh`. All service-to-service over HTTPS with CA verification.
@@ -289,10 +299,10 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - Proxy on `int_net` only. All Anthropic API calls route through `caddy-sidecar:8081`, hardcoded to `api.anthropic.com:443` with public TLS. `tls_insecure_skip_verify` removed.
 
 ### Container Hardening
-- All seven containers: `cap_drop: ALL`, `mem_limit`, `cpus`, `pids_limit`. `caddy-sidecar` and `proxy` additionally have `read_only: true`. `no-new-privileges` deferred (kernel 6.17.0-19 does not support it).
+- All eight containers: `cap_drop: ALL`, `mem_limit`, `cpus`, `pids_limit`. `caddy-sidecar` and `proxy` additionally have `read_only: true`. `no-new-privileges` deferred (kernel 6.17.0-19 does not support it).
 
 ### Log Sanitization
-- `server.py`: subprocess stdout/stderr at DEBUG level; `_redact_secrets()` redacts known token values with `[REDACTED]` before any log output. All service tokens (`CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`) are now included (RR-18 resolved 2026-03-30).
+- `server.py`: subprocess stdout/stderr at DEBUG level; `_redact_secrets()` redacts known token values with `[REDACTED]` before any log output. All service tokens (`CLAUDE_API_TOKEN`, `DYNAMIC_AGENT_KEY`, `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `LOG_API_TOKEN`) are included.
 
 ### Plan Field-length Validation (2026-03-30)
 - `plan_server.py` enforces maximum lengths on all text fields. Oversized payloads rejected with HTTP 400.
@@ -314,7 +324,7 @@ Replaced with dedicated `:8081` listener → `api.anthropic.com:443` with public
 All containers now have `mem_limit`, `cpus`, `pids_limit`.
 
 ### ~~RR-4: Shared MCP_API_TOKEN Across Three Services~~ — RESOLVED (2026-03-28)
-Per-service tokens: `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`.
+Per-service tokens: `MCP_API_TOKEN`, `PLAN_API_TOKEN`, `TESTER_API_TOKEN`, `GIT_API_TOKEN`, `LOG_API_TOKEN`.
 
 ### ~~RR-5: File Content Logged in Plaintext~~ — RESOLVED (2026-03-28)
 `FILE_READ: <path> (<n> bytes, sha256=<hex>)` only. Regression test added.
@@ -332,7 +342,7 @@ All path query parameters in `files_mcp.py` use `params=` kwarg.
 - **Recommendation:** Add a Caddy rate-limit directive or a FastAPI semaphore. Enforce a maximum of N concurrent agent subprocesses.
 
 ### ~~RR-9: Missing cap_drop on Most Containers~~ — RESOLVED (2026-03-28)
-All seven containers now have `cap_drop: ALL`.
+All eight containers now have `cap_drop: ALL`.
 
 ### RR-10: Cert Validity 365 Days, No Rotation Mechanism
 - **Severity:** Low
@@ -356,25 +366,19 @@ Both `mcp-server/main.go` and `tester/main.go` now use `tls.VersionTLS13`. Unit 
 Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit tests added.
 
 ### ~~RR-15: Agent Model Parameter Not Validated~~ — RESOLVED (2026-03-30)
-- **Severity:** Low
-- **Likelihood:** Low
-- **Description:** `server.py` passes `request.model` directly to `--model` flag. Shell injection is not possible (subprocess args are a list). However, an attacker with `CLAUDE_API_TOKEN` could specify arbitrary model names, potentially causing errors or unintended API usage.
-- **Status: Fixed** — `ALLOWED_MODELS` frozenset (`claude-sonnet-4-6`, `claude-opus-4-6`, `claude-haiku-4-5-20251001`) defined in `server.py`. `_validate_model()` is called at the top of both `/ask` and `/plan` before any subprocess is spawned; unknown models are rejected with HTTP 400. Five unit tests cover reject/accept/empty/prefix-attack cases.
+`ALLOWED_MODELS` frozenset defined in `server.py`. `_validate_model()` called at top of both `/ask` and `/plan`; unknown models rejected with HTTP 400. Five unit tests cover reject/accept/empty/prefix-attack cases.
 
 ### ~~RR-16: Unbounded Request Body Size on /ask and /plan~~ — RESOLVED (2026-03-30)
-- **Severity:** Medium
-- **Likelihood:** Low (requires stolen CLAUDE_API_TOKEN)
-- **Description:** `QueryRequest` had `query: str` and `model: str` with no length constraints.
-- **Status: Fixed** — `QueryRequest.query` now has `max_length=100_000` and `QueryRequest.model` has `max_length=200` via Pydantic `Field`; oversized payloads are rejected with HTTP 422 before any endpoint logic runs. Caddy `:8443` block additionally enforces `request_body { max_size 256KB }` as a defence-in-depth layer. Five unit tests in `TestQueryRequestValidation` cover boundary conditions.
+`QueryRequest.query` has `max_length=100_000` and `QueryRequest.model` has `max_length=200` via Pydantic `Field`. Caddy `:8443` additionally enforces `request_body { max_size 256KB }`. Five unit tests cover boundary conditions.
 
-### RR-17: Query Content Logged at INFO Level Without Truncation *(NEW)*
+### RR-17: Query Content Logged at INFO Level Without Truncation
 - **Severity:** Low
 - **Likelihood:** Medium (every invocation)
-- **Description:** `server.py` lines 140 and 197 log the full query at `INFO` level unconditionally:
+- **Description:** `server.py` logs the full query at `INFO` level unconditionally:
   ```python
   logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
   ```
-  Unlike subprocess stdout (moved to DEBUG in RR-11), the input query is always logged regardless of `LOG_LEVEL`. This means:
+  Unlike subprocess stdout (moved to DEBUG in RR-11), the *input* query is always logged regardless of `LOG_LEVEL`. This means:
   - Large queries permanently consume log storage.
   - Any sensitive data accidentally included in a query is stored in logs.
   - An insider (TA-5) with log access sees the full content of every invocation.
@@ -384,42 +388,67 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
   ```
 
 ### ~~RR-18: GIT_API_TOKEN Absent from Log Redaction List~~ — RESOLVED (2026-03-30)
+`GIT_API_TOKEN` added to `_SECRET_TOKENS` in `server.py`. `LOG_API_TOKEN` also included. Dedicated unit test `test_git_api_token_is_redacted` verifies redaction.
+
+### RR-19: LOG_API_TOKEN Missing from proxy and caddy Isolation Checks
+- **Severity:** Low
+- **Likelihood:** Very Low (requires misconfiguration + container compromise)
+- **Description:** `verify_isolation.py` lists `LOG_API_TOKEN` as forbidden in `mcp-server`, `plan-server`, `tester-server`, `git-server`, and `log-server` (correctly). However, it is **absent** from `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]`. If `LOG_API_TOKEN` were to leak into those container environments via a docker-compose misconfiguration, the startup isolation checks would not catch it — allowing a compromised proxy or caddy to use the token to query session logs from `log-server`.
+- **Recommendation:** Add `"LOG_API_TOKEN"` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. Add a corresponding unit test asserting the check is present.
+
+### RR-20: Session Log Data Retention — No Rotation or TTL Policy
 - **Severity:** Medium
-- **Likelihood:** Low (only manifests at DEBUG log level or if agent echoes token)
-- **Description:** `server.py` builds `_SECRET_TOKENS` from `[CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN]`. `GIT_API_TOKEN` is **not included**, even though it is present in the claude-server process environment and is passed to the Claude Code subprocess via `**os.environ`. If the agent echoes the git token in its response text (e.g., via prompt injection), `_redact_secrets()` will not redact it from DEBUG-level log output.
-- **Recommendation:** Import `GIT_API_TOKEN` from `runenv` and add it to `_SECRET_TOKENS`:
-  ```python
-  from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, \
-      MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, \
-      SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
-  
-  _SECRET_TOKENS = [
-      t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN,
-                  PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN]
-      if t
-  ]
-  ```
+- **Likelihood:** Certain (logs grow on every run)
+- **Description:** JSONL log files in `/logs` accumulate indefinitely with no documented retention policy, rotation mechanism, or disk quota. Over time this creates: (a) a growing historical store of session metadata exposable by host compromise, and (b) a potential disk-exhaustion vector if invoked at high frequency.
+- **Recommendation:**
+  1. Document a retention policy (e.g., 30-day TTL).
+  2. Add a configurable `LOG_RETENTION_DAYS` env var to `log-server` that prunes old JSONL files at startup.
+  3. Consider setting a size cap on the `./logs` Docker volume.
+
+### RR-21: Silent Log Drops — Incomplete Audit Trail
+- **Severity:** Low
+- **Likelihood:** Low (requires log-server unavailability)
+- **Description:** `_emit_log_event()` uses fire-and-forget daemon threads. Log-server unavailability causes silent event loss with only a `WARNING` log in `claude-server`. The audit trail is incomplete for those sessions.
+- **Recommendation:** Document that git commit history is the primary, authoritative audit record. Optionally expose a dropped-event counter at `/health` or in a metrics endpoint.
 
 ---
 
-## 7. STRIDE Summary Table
+## 7. Token Isolation Matrix
+
+| Token | claude-server | proxy | mcp-server | plan-server | tester-server | git-server | log-server | caddy |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | — |
+| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| GIT_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| LOG_API_TOKEN | ✓ required | ⚠ not checked | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ⚠ not checked |
+
+> ⚠ = token is not present in practice (not set in docker-compose for those roles) but isolation check does not enforce absence. See RR-19.
+
+---
+
+## 8. STRIDE Summary Table
 
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
-| **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 ✅) | No request audit log (RR-17) | Query content in logs (RR-17) | No rate limit (RR-8); large body (RR-16) | — |
-| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | ~~GIT_API_TOKEN not redacted (RR-18)~~ ✅; Env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8); unbounded body (RR-16) | ~~Slash command path traversal (RR-7)~~ ✅ |
+| **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 ✅) | No request audit log | Query content in logs (RR-17) | No rate limit (RR-8) | — |
+| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | Env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8) | ~~Slash command path traversal (RR-7)~~ ✅ |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses | — | — | — | — |
 | **files_mcp.py** | — | ~~URL param injection (RR-6)~~ ✅ | — | — | — | — |
 | **mcp-server (Go)** | — | — | ~~File content fully logged (RR-5)~~ ✅ | ~~File content in logs (RR-5)~~ ✅ | ~~No resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
 | **git-server** | — | Submodule path accepted without extra validation | — | Git history poisoning (§4.2) | — | — |
 | **plan-server** | — | ~~Plan content injection (RR-14)~~ ✅ | — | — | — | cap_drop: ALL ✓ |
 | **tester-server** | — | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ ✅; ~~no resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
-| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | ~~Model routing manipulation~~ (RR-15 fixed) | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
-| **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, certs on host disk | — | TA-5 insider |
+| **log-server** | LOG_API_TOKEN theft | Log file tampering (host-level only) | Silent drops (RR-21) | Session metadata exfiltration via log_mcp (§4.2); LOG_API_TOKEN isolation gap (RR-19) | Log accumulation → disk exhaustion (RR-20) | cap_drop: ALL ✓ |
+| **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | ~~Model routing manipulation~~ (RR-15 ✅) | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
+| **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, logs/, certs on host disk | — | TA-5 insider |
 
 ---
 
-## 8. Observations: Where This System Exceeds Typical Deployment Security
+## 9. Observations: Where This System Exceeds Typical Deployment Security
 
 1. **Structural, not filtered, filesystem jail** (`os.OpenRoot`) — traversal blocked by the kernel, not regex.
 2. **3-layer git hook prevention** — tmpfs shadow + separated gitdir + `core.hooksPath=/dev/null` + `--no-verify`.
@@ -427,18 +456,19 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 4. **Prompt immutability via filesystem ownership** — root-owned system prompts, verified at startup.
 5. **mcp-watchdog** intercepting all tool calls before they reach MCP servers.
 6. **Plan-server structural isolation** — the planning tool cannot read workspace or commit files by design.
-7. **Startup isolation checks with sys.exit(1)** — containers refuse to start if security invariants are violated.
-8. **Constant-time token comparison** in all token verification paths.
-9. **DYNAMIC_AGENT_KEY substitution** — the agent never holds the real Anthropic API key.
-10. **MCP config as a build artifact** — the agent cannot modify which tools it has access to at runtime.
-11. **Domain-locked egress filtering** — proxy on `int_net` only; all outbound traffic routes through a dedicated Caddy endpoint hardcoded to `api.anthropic.com:443` only.
-12. **Read-only root filesystems** on internet-adjacent containers (caddy-sidecar, proxy).
-13. **Per-service token scoping** — compromise of one token does not grant access to other backends.
-14. **Plan field-length validation** — all text fields bounded; oversized payloads rejected at HTTP 400.
+7. **Log-server structural isolation** — session logging has no access to workspace, git, or plans; logs metadata only.
+8. **Startup isolation checks with sys.exit(1)** — containers refuse to start if security invariants are violated.
+9. **Constant-time token comparison** in all token verification paths.
+10. **DYNAMIC_AGENT_KEY substitution** — the agent never holds the real Anthropic API key.
+11. **MCP config as a build artifact** — the agent cannot modify which tools it has access to at runtime.
+12. **Domain-locked egress filtering** — proxy on `int_net` only; all outbound traffic routes through a dedicated Caddy endpoint hardcoded to `api.anthropic.com:443` only.
+13. **Read-only root filesystems** on internet-adjacent containers (caddy-sidecar, proxy).
+14. **Per-service token scoping** — 7 distinct service tokens; compromise of one token does not grant access to other backends.
+15. **Plan field-length validation** — all text fields bounded; oversized payloads rejected at HTTP 400.
 
 ---
 
-## 9. Recommended Mitigations (Priority Order)
+## 10. Recommended Mitigations (Priority Order)
 
 | Priority | Risk | Action | Status |
 |----------|------|--------|--------|
@@ -453,10 +483,13 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | ~~P3~~ | ~~RR-9~~ | ~~Add `cap_drop: ALL` to all containers~~ | ✅ Done 2026-03-28 |
 | ~~P3~~ | ~~RR-12~~ | ~~Upgrade Go servers to TLS 1.3~~ | ✅ Done 2026-03-29 |
 | ~~P3~~ | ~~RR-14~~ | ~~Plan field-length validation~~ | ✅ Done 2026-03-30 |
-| ~~P3~~ | ~~RR-18~~ | ~~Add `GIT_API_TOKEN` to `_SECRET_TOKENS` in `server.py`~~ | ✅ Done 2026-03-30 |
-| ~~P3~~ | ~~RR-16~~ | ~~Add `max_length` to `QueryRequest.query` and `QueryRequest.model`; add Caddy body size limit~~ | ✅ Done 2026-03-30 |
+| ~~P3~~ | ~~RR-18~~ | ~~Add `GIT_API_TOKEN` and `LOG_API_TOKEN` to `_SECRET_TOKENS`~~ | ✅ Done 2026-03-30 |
+| ~~P3~~ | ~~RR-16~~ | ~~Add `max_length` to `QueryRequest`; add Caddy body size limit~~ | ✅ Done 2026-03-30 |
 | **P3** | **RR-8** | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | **Open** |
+| **P3** | **RR-20** | Add log retention/rotation policy to log-server; document TTL | **Open** |
+| **P4** | **RR-19** | Add `LOG_API_TOKEN` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py` | **Open** |
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
-| P4 | RR-13 | Document test output as trust boundary; add output length cap | Open |
+| P4 | RR-13 | Document test output as trust boundary; add 64 KB output length cap | Open |
 | ~~P4~~ | ~~RR-15~~ | ~~Whitelist allowed model names in `/ask` and `/plan`~~ | ✅ Done 2026-03-30 |
 | P4 | RR-10 | Add cert expiry monitoring; document rotation procedure | Open |
+| P4 | RR-21 | Document git history as primary audit trail; optionally expose dropped-event counter | Open |
