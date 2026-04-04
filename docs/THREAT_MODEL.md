@@ -210,11 +210,11 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 #### Bypass of Token Validation
 - All token comparisons use `secrets.compare_digest` (Python) or `subtle.ConstantTimeCompare` (Go). All services call `log.Fatal` on empty token at startup. No bypass risk identified.
 
-#### LOG_API_TOKEN Missing from proxy and caddy Isolation Checks (NEW — RR-19)
-- **Attack:** `LOG_API_TOKEN` is absent from `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. If `LOG_API_TOKEN` were to leak into the `proxy` or `caddy` container environments (e.g., via a misconfigured `docker-compose.yml`), startup isolation checks would not detect it.
+#### ~~LOG_API_TOKEN Missing from proxy and caddy Isolation Checks~~ (RESOLVED — RR-19)
+- **Attack:** `LOG_API_TOKEN` was absent from `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. If `LOG_API_TOKEN` were to leak into the `proxy` or `caddy` container environments (e.g., via a misconfigured `docker-compose.yml`), startup isolation checks would not detect it.
 - **Impact:** Confidentiality of LOG_API_TOKEN slightly weakened — a compromised proxy or caddy could read it from env and query session logs from log-server. Log-server is on `int_net` and requires the token, limiting the direct blast radius.
 - **Severity:** Low (requires misconfiguration AND container compromise).
-- **Recommendation:** Add `LOG_API_TOKEN` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`.
+- **Resolution (2026-04-04):** `LOG_API_TOKEN` added to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. Regression tests `test_log_api_token_in_proxy_forbidden_list` and `test_log_api_token_in_caddy_forbidden_list` added to `test_isolation.py`.
 
 ---
 
@@ -390,11 +390,8 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 ### ~~RR-18: GIT_API_TOKEN Absent from Log Redaction List~~ — RESOLVED (2026-03-30)
 `GIT_API_TOKEN` added to `_SECRET_TOKENS` in `server.py`. `LOG_API_TOKEN` also included. Dedicated unit test `test_git_api_token_is_redacted` verifies redaction.
 
-### RR-19: LOG_API_TOKEN Missing from proxy and caddy Isolation Checks
-- **Severity:** Low
-- **Likelihood:** Very Low (requires misconfiguration + container compromise)
-- **Description:** `verify_isolation.py` lists `LOG_API_TOKEN` as forbidden in `mcp-server`, `plan-server`, `tester-server`, `git-server`, and `log-server` (correctly). However, it is **absent** from `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]`. If `LOG_API_TOKEN` were to leak into those container environments via a docker-compose misconfiguration, the startup isolation checks would not catch it — allowing a compromised proxy or caddy to use the token to query session logs from `log-server`.
-- **Recommendation:** Add `"LOG_API_TOKEN"` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. Add a corresponding unit test asserting the check is present.
+### ~~RR-19: LOG_API_TOKEN Missing from proxy and caddy Isolation Checks~~ — RESOLVED (2026-04-04)
+`LOG_API_TOKEN` added to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. Regression tests added to `test_isolation.py`.
 
 ### RR-20: Session Log Data Retention — No Rotation or TTL Policy
 - **Severity:** Medium
@@ -424,9 +421,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
 | GIT_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
-| LOG_API_TOKEN | ✓ required | ⚠ not checked | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ⚠ not checked |
-
-> ⚠ = token is not present in practice (not set in docker-compose for those roles) but isolation check does not enforce absence. See RR-19.
+| LOG_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
 
 ---
 
@@ -442,7 +437,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | **git-server** | — | Submodule path accepted without extra validation | — | Git history poisoning (§4.2) | — | — |
 | **plan-server** | — | ~~Plan content injection (RR-14)~~ ✅ | — | — | — | cap_drop: ALL ✓ |
 | **tester-server** | — | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ ✅; ~~no resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
-| **log-server** | LOG_API_TOKEN theft | Log file tampering (host-level only) | Silent drops (RR-21) | Session metadata exfiltration via log_mcp (§4.2); LOG_API_TOKEN isolation gap (RR-19) | Log accumulation → disk exhaustion (RR-20) | cap_drop: ALL ✓ |
+| **log-server** | LOG_API_TOKEN theft | Log file tampering (host-level only) | Silent drops (RR-21) | Session metadata exfiltration via log_mcp (§4.2) | Log accumulation → disk exhaustion (RR-20) | cap_drop: ALL ✓ |
 | **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | ~~Model routing manipulation~~ (RR-15 ✅) | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, logs/, certs on host disk | — | TA-5 insider |
 
@@ -487,7 +482,7 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | ~~P3~~ | ~~RR-16~~ | ~~Add `max_length` to `QueryRequest`; add Caddy body size limit~~ | ✅ Done 2026-03-30 |
 | **P3** | **RR-8** | Add rate limiting or concurrency cap on `/ask`/`/plan` endpoints | **Open** |
 | **P3** | **RR-20** | Add log retention/rotation policy to log-server; document TTL | **Open** |
-| **P4** | **RR-19** | Add `LOG_API_TOKEN` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py` | **Open** |
+| ~~P4~~ | ~~RR-19~~ | ~~Add `LOG_API_TOKEN` to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`~~ | ✅ Done 2026-04-04 |
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
 | P4 | RR-13 | Document test output as trust boundary; add 64 KB output length cap | Open |
 | ~~P4~~ | ~~RR-15~~ | ~~Whitelist allowed model names in `/ask` and `/plan`~~ | ✅ Done 2026-03-30 |
