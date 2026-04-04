@@ -72,10 +72,10 @@ Host / Network
 
 | Endpoint | Script | System prompt | Purpose |
 | :--- | :--- | :--- | :--- |
-| POST /ask | query.sh | SYSTEM_PROMPT (cluster/agent/prompts/system/ask.md) | Execute code changes, follow active plan |
+| POST /ask | query.sh | ask.md (plan-driven) or ask-adhoc.md (ad-hoc) | Execute code changes; server pre-checks plan-server and uses the plan-driven loop when a task is active, or a single ad-hoc invocation when no plan exists |
 | POST /plan | plan.sh | PLAN_SYSTEM_PROMPT (cluster/agent/prompts/system/plan.md) | Create plans only, no code execution |
 
-`cluster/agent/prompts/system/` supplies both system prompts; `cluster/agent/prompts/commands/` supplies Claude Code slash commands. Both are baked into the claude-server image at build time (`COPY agent/prompts/system/ /app/prompts/` and `COPY agent/prompts/commands/ /home/appuser/.claude/commands/`) — no runtime bind-mount is required. `runenv.py` reads `ask.md` and `plan.md` from `/app/prompts/` on startup.
+`cluster/agent/prompts/system/` supplies all system prompts (`ask.md`, `ask-adhoc.md`, `plan.md`); `cluster/agent/prompts/commands/` supplies Claude Code slash commands. Both are baked into the claude-server image at build time (`COPY agent/prompts/system/ /app/prompts/` and `COPY agent/prompts/commands/ /home/appuser/.claude/commands/`) — no runtime bind-mount is required. `runenv.py` reads these prompts from `/app/prompts/` on startup.
 
 ### Request flow (/ask):
 1. `query.sh` → POST https://localhost:8443/ask (Bearer CLAUDE_API_TOKEN)
