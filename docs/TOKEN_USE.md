@@ -179,26 +179,23 @@ Three sessions consumed >700k cache tokens each. Session 7ae06422 hit 7.1M cache
 | **Fix** | (1) Hard turn limit in `server.py` via `--max-turns` flag; (2) task decomposition in plans to keep each task ≤8 turns; (3) output token budget to prevent verbose generation |
 | **Effort** | Low (flag) / Medium (decomposition) |
 
-### 4.3 Test Output Bloat — ⚠️ MEDIUM PRIORITY
+### 4.3 Test Output Bloat — ✅ RESOLVED
 
-Unchanged. `get_test_results` returns full stdout/stderr. 2,000–15,000 tokens enter context per test run.
-
-| Metric | Estimate |
-|--------|----------|
-| Tokens wasted per passing task | 2,000–15,000 in context |
-| Extra cache from carry-forward | 4,000–30,000 tok over subsequent turns |
-| **Fix** | On pass: `{"status":"pass","exit_code":0}`. On fail: last 50 lines only |
-| **Effort** | Low |
-
-### 4.4 Polling Waste — ⚠️ MEDIUM PRIORITY
-
-System prompt mitigates to 1–3 polls. Each unnecessary poll re-reads ~30k+ cached context.
+Truncation implemented in `001c0cc`. Pass returns minimal JSON; fail returns last 50 lines.
 
 | Metric | Estimate |
 |--------|----------|
-| Extra cache per unnecessary poll | ~30,000–78,000 tok |
-| **Fix** | Add `wait=true` to `GET /results` in tester-server |
-| **Effort** | Medium |
+| Tokens saved per passing task | 2,000–15,000 in context |
+| **Status** | **Done** |
+
+### 4.4 Polling Waste — ✅ RESOLVED
+
+Blocking `wait=true` implemented in tester-server (`42b3338`) and wired into tester_mcp (`4f6da71`).
+
+| Metric | Estimate |
+|--------|----------|
+| Polls eliminated | 1–2 round-trips per tested task |
+| **Status** | **Done** |
 
 ### 4.5 Analysis Document Self-Growth — LOW PRIORITY
 
@@ -210,15 +207,14 @@ TOKEN_USE.md is ~11,000 tokens. Growth is capped by rewriting (not appending) on
 | **Fix** | Exclude from routine reads via system prompt; archive historical data |
 | **Effort** | Low |
 
-### 4.6 Observability Gap — ❌ HIGH OPERATIONAL PRIORITY
+### 4.6 Observability Gap — ✅ RESOLVED
 
-`tool_counts` is `{}` in all 25 sessions analyzed across 3 analysis runs. This is the #1 infrastructure prerequisite.
+MCP backends instrumented: `file_read` (`c99223e`), `test_run` (`40391a5`), `git_op` (`cd0f026`) events now emitted via shared `log_emit` helper (`0b98f00`). Per-turn LLM logging added via `stream-json` (`28518aa`).
 
 | Metric | Notes |
 |--------|-------|
-| Missing events | `tool_call`, `file_read`, `test_run`, `git_op` |
-| **Fix** | Instrument mcp-server, tester-server, git-server to emit events to log-server |
-| **Effort** | Medium |
+| Events now emitted | `file_read`, `test_run`, `git_op`, per-turn `llm_call` |
+| **Status** | **Done** |
 
 ### 4.7 Context Accumulation — ✅ RESOLVED
 
@@ -351,16 +347,16 @@ Parse `--output-format json` for per-turn usage. Emit per-turn `llm_call` events
 |----------|------|----------|---------------|------------------|--------|--------|
 | P0 | Add `--max-turns 16` to `claude --print` invocation | Runaway Prevention | Up to 7.1M cache tok/session ($1.95–$9.75) | Caps worst-case at ~560k cache | Low | Open |
 | P0 | Default `/ask` to Sonnet — reserve Opus for explicit opt-in | Model Allocation | 5× cost premium on 10% of sessions | ~80% cost reduction on affected sessions | Low | Open |
-| P1 | Truncate test output on pass — return `{"status":"pass"}` only; last 50 lines on fail | Infrastructure | 2,000–15,000 tok/task in context | 2,000–15,000 tok/task | Low | Open |
-| P1 | Instrument mcp-server, tester-server, git-server to emit log events | Observability | All waste categories unquantifiable | Full per-tool visibility | Medium | Open |
-| P2 | Add `wait=true` to `get_test_results` (server-side blocking) | Infrastructure | 1–2 poll round-trips (~30k–78k cache tok each) | 1–2 round-trips per tested task | Medium | Open |
+| P1 | Truncate test output on pass — return `{"status":"pass"}` only; last 50 lines on fail | Infrastructure | 2,000–15,000 tok/task in context | 2,000–15,000 tok/task | Low | **Done** |
+| P1 | Instrument mcp-server, tester-server, git-server to emit log events | Observability | All waste categories unquantifiable | Full per-tool visibility | Medium | **Done** |
+| P2 | Add `wait=true` to `get_test_results` (server-side blocking) | Infrastructure | 1–2 poll round-trips (~30k–78k cache tok each) | 1–2 round-trips per tested task | Medium | **Done** |
 | P2 | Split `ARCHITECTURE.md` → overview + detail; update system prompt | Documentation | ~7,000–9,000 tok/routine task | ~7,000–9,000 tok/task | Low | **Done** |
 | P2 | Archive TOKEN_USE history; exclude from routine reads | Context Hygiene | ~11,000 tok if read on non-analysis tasks | Caps doc growth; eliminates ~11k tok | Low | Open |
 | P3 | Pre-spawn plan check in `server.py` — skip subprocess if no pending task | Infrastructure | ~22k tok + 7s per DONE call | 22k tok per no-op | Low | **Done** |
-| P3 | Verify pre-spawn check covers ad-hoc endpoint (DONE-calls still at 20%) | Infrastructure | ~22k tok/DONE-call | Eliminates remaining DONE-calls | Low | Open |
-| P3 | Per-turn LLM event logging (parse `--output-format json`) | Observability | Round-trip counts invisible | Full turn-level visibility | Medium | Open |
+| P3 | Verify pre-spawn check covers ad-hoc endpoint (DONE-calls still at 20%) | Infrastructure | ~22k tok/DONE-call | Eliminates remaining DONE-calls | Low | **Done** |
+| P3 | Per-turn LLM event logging (parse `--output-format json`) | Observability | Round-trip counts invisible | Full turn-level visibility | Medium | **Done** |
 | P4 | Shorten tool descriptions (submodule_path + async explanation) | Tool Descriptions | ~500 tok/call (cached) | ~500 tok/call | Low | **Done** |
-| P4 | Enable SHA256 dedup detection for file reads via log analysis | Observability | Unknown (est. ~500–5k tok/dup) | Unknown until P1 instrumentation | Low | Blocked (needs P1) |
+| P4 | Enable SHA256 dedup detection for file reads via log analysis | Observability | Unknown (est. ~500–5k tok/dup) | Unknown until P1 instrumentation | Low | Open (unblocked — P1 done) |
 
 ### Status Legend
 
@@ -383,3 +379,8 @@ Parse `--output-format json` for per-turn usage. Emit per-turn `llm_call` events
 | Prompt caching (Anthropic API) | Infrastructure | 10× reduction on fixed overhead ($0.30 vs $3.00/MTok) |
 | Shortened tool descriptions | Tool Descriptions | ~500 tok/call removed from cached baseline |
 | Pre-spawn plan check | Infrastructure | ~22k tok + startup cost per no-op (when it triggers) |
+| Truncated test output (pass: minimal JSON; fail: last 50 lines) | Infrastructure | 2,000–15,000 tok/task removed from context |
+| MCP backend log instrumentation (file_read, test_run, git_op events) | Observability | Full per-tool visibility enabled |
+| Blocking `wait=true` on `get_test_results` | Infrastructure | 1–2 poll round-trips eliminated per tested task |
+| Intra-loop plan check covers ad-hoc endpoint | Infrastructure | Eliminates remaining DONE-call overhead |
+| Per-turn LLM event logging (stream-json + _log_llm_turns) | Observability | Full turn-level visibility into context growth |
