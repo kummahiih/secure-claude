@@ -156,5 +156,10 @@ Every container validates security invariants before serving:
 | RR-17 | Low | Query content logged at INFO without truncation |
 | RR-20 | Medium | Session log data retention — no rotation or TTL policy |
 | RR-21 | Low | Silent log drops — incomplete audit trail |
+| RR-22 | Low | Unauthenticated `/health` endpoint enables reconnaissance |
+| RR-23 | Medium | `docs_mcp.py` `startswith()` prefix matching without `os.sep` — latent path escape |
+| RR-24 | Medium | Unredacted `stderr` in HTTP error responses leaks internal details |
+| RR-25 | Low | Race condition in `tester_mcp.py` 3-strike global state |
+| RR-26 | Low | Generic exception `str(e)` returned in HTTP responses |
 
 Full threat model and residual risk details: [THREAT_MODEL.md](THREAT_MODEL.md)

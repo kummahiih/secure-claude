@@ -1,6 +1,6 @@
 # Threat Model: secure-claude
 
-**Date:** 2026-04-04 (updated 2026-04-04 — full refresh; log-server added as 8th service)
+**Date:** 2026-04-05 (updated 2026-04-05 — code reconnaissance: 5 new findings RR-22 through RR-26)
 **Scope:** secure-claude cluster — hardened containerised environment for running Claude Code as an autonomous AI agent
 **Methodology:** STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)
 **Classification:** Internal Engineering Review
@@ -216,6 +216,36 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - **Severity:** Low (requires misconfiguration AND container compromise).
 - **Resolution (2026-04-04):** `LOG_API_TOKEN` added to `FORBIDDEN_ENV_VARS["proxy"]` and `FORBIDDEN_ENV_VARS["caddy"]` in `verify_isolation.py`. Regression tests `test_log_api_token_in_proxy_forbidden_list` and `test_log_api_token_in_caddy_forbidden_list` added to `test_isolation.py`.
 
+#### Unauthenticated /health Endpoint (RR-22)
+- **Attack:** The `/health` endpoint in `server.py` has no authentication requirement (`@app.get("/health")` with no `verify_token` dependency). An unauthenticated external caller (TA-1) can probe server availability, confirm the service is running, and fingerprint response timing.
+- **Prerequisites:** Network access to Caddy `:8443`. No token required.
+- **Impact:** Low — information disclosure (service liveness). However, combined with RR-8 (no rate limiting), enables availability probing for timing-based attacks.
+- **Note:** Health endpoints are conventionally unauthenticated for load balancer integration. Risk is accepted if Caddy does not expose `/health` externally; elevated if it does.
+
+#### docs_mcp.py Path Traversal via Prefix Matching (RR-23)
+- **Attack:** `_safe_path()` in `docs_mcp.py` uses `resolved.startswith(os.path.realpath(DOCS_DIR))` without appending `os.sep` to the base directory. If a sibling directory exists whose name shares the `/docs` prefix (e.g., `/docs_backup`), the `startswith` check passes: `"/docs_backup/secret.md".startswith("/docs")` → `True`.
+- **Prerequisites:** A directory on the filesystem shares a prefix with `DOCS_DIR` (e.g., `/docs_internal`, `/docs_backup`). In the current Docker setup, `/docs` is a specific bind mount and no sibling exists — but this is a latent vulnerability if mount layout changes.
+- **Impact:** Medium — agent could read files outside the intended docs directory. Mitigated by Docker mount isolation (no sibling directories exist in current layout).
+- **Recommendation:** Append `os.sep` to the base path: `resolved.startswith(os.path.realpath(DOCS_DIR) + os.sep)` or check `resolved == os.path.realpath(DOCS_DIR)`.
+
+#### Unredacted stderr in HTTP Error Responses (RR-24)
+- **Attack:** `server.py` returns raw `result.stderr` in HTTP error responses (e.g., `return {"error": result.stderr}`) without passing through `_redact_secrets()`. If the Claude Code subprocess emits tokens, internal paths, or stack traces to stderr, these are returned verbatim to the authenticated caller.
+- **Prerequisites:** Authenticated caller (holds `CLAUDE_API_TOKEN`). Claude Code subprocess must produce stderr containing sensitive content.
+- **Impact:** Medium — information disclosure of internal paths, dependency versions, and potentially token fragments in error messages. The caller is already authenticated, which limits the blast radius, but stderr may contain more than the caller should see.
+- **Recommendation:** Apply `_redact_secrets()` to all `result.stderr` values before including in HTTP responses. Truncate stderr to a reasonable length (e.g., 4 KB).
+
+#### Race Condition in tester_mcp.py Global State (RR-25)
+- **Attack:** `tester_mcp.py` uses unprotected global variables (`_consecutive_failures`, `_failure_counted_for_current_run`) to implement a 3-strike hard stop. In an async MCP server context, concurrent tool calls can race on these globals: one coroutine reads the counter while another increments it, leading to either a bypassed hard stop (counter not incremented) or a false hard stop (counter double-incremented).
+- **Prerequisites:** Multiple concurrent `run_tests` / `get_test_results` MCP calls. In practice, Claude Code issues tool calls sequentially, making exploitation unlikely under normal operation.
+- **Impact:** Low — incorrect 3-strike enforcement. Bypass allows unlimited test retries (wasting compute); false trigger causes premature task failure. Neither leads to data compromise.
+- **Recommendation:** Protect global state with `asyncio.Lock` or use `threading.Lock` if called from sync context.
+
+#### Generic Exception Info Disclosure in HTTP Responses (RR-26)
+- **Attack:** `server.py` catches broad `Exception` in `/ask` and `/plan` handlers and returns `str(e)` in the HTTP response body. Depending on the exception type, this may leak internal file paths, library versions, database connection strings, or other implementation details.
+- **Prerequisites:** Authenticated caller. An unexpected exception must occur during request processing.
+- **Impact:** Low — information disclosure to an already-authenticated caller. Exception messages are typically opaque but may occasionally contain internal details useful for further attacks.
+- **Recommendation:** Return a generic error message in production responses; log the full exception server-side. Example: `return {"error": "Internal agent execution error"}`.
+
 ---
 
 ### 4.4 New / Previously Untracked Vectors
@@ -408,6 +438,36 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 - **Description:** `_emit_log_event()` uses fire-and-forget daemon threads. Log-server unavailability causes silent event loss with only a `WARNING` log in `claude-server`. The audit trail is incomplete for those sessions.
 - **Recommendation:** Document that git commit history is the primary, authoritative audit record. Optionally expose a dropped-event counter at `/health` or in a metrics endpoint.
 
+### RR-22: Unauthenticated /health Endpoint
+- **Severity:** Low
+- **Likelihood:** Medium (always accessible if Caddy routes it)
+- **Description:** `server.py` exposes `GET /health` with no bearer token check. If Caddy forwards `/health` to `claude-server`, any network-reachable caller can confirm service liveness without authentication. This aids reconnaissance (TA-1) and can be combined with RR-8 for availability probing.
+- **Recommendation:** Either (a) block `/health` at the Caddy layer from external access, or (b) accept the risk — health endpoints are conventionally unauthenticated for load balancer probes. Document the decision.
+
+### RR-23: docs_mcp.py Path Traversal via startswith() Prefix Matching
+- **Severity:** Medium
+- **Likelihood:** Low (requires sibling directory with shared prefix; none exist in current Docker layout)
+- **Description:** `_safe_path()` in `docs_mcp.py` validates paths using `resolved.startswith(os.path.realpath(DOCS_DIR))` without appending `os.sep`. A sibling directory whose name shares the prefix (e.g., `/docs_backup`) would pass the check. In the current Docker layout, `/docs` is an isolated bind mount with no siblings — but this is a latent flaw activated by any mount layout change.
+- **Recommendation:** Change to `resolved.startswith(os.path.realpath(DOCS_DIR) + os.sep)` or add `resolved == os.path.realpath(DOCS_DIR)` as an additional condition. Add a unit test for the boundary case.
+
+### RR-24: Unredacted stderr in HTTP Error Responses
+- **Severity:** Medium
+- **Likelihood:** Medium (occurs on every subprocess failure)
+- **Description:** `server.py` returns raw `result.stderr` in HTTP error responses without applying `_redact_secrets()`. While logs are properly redacted, HTTP responses may expose internal paths, stack traces, dependency versions, or token fragments to the authenticated caller. The `_redact_secrets()` function exists but is only applied to log output, not to HTTP response bodies.
+- **Recommendation:** Apply `_redact_secrets()` to all `result.stderr` values before including in HTTP responses. Truncate to 4 KB maximum. Example: `return {"error": _redact_secrets(result.stderr)[:4096]}`.
+
+### RR-25: Race Condition in tester_mcp.py 3-Strike Global State
+- **Severity:** Low
+- **Likelihood:** Low (Claude Code issues sequential tool calls in practice)
+- **Description:** `tester_mcp.py` uses unprotected global variables (`_consecutive_failures`, `_failure_counted_for_current_run`) for the 3-strike hard stop mechanism. Concurrent async calls could race on these globals, either bypassing the hard stop (counter not incremented) or triggering a false hard stop (counter double-incremented).
+- **Recommendation:** Protect with `asyncio.Lock`. Low urgency given sequential tool call pattern, but defensive coding prevents future issues if concurrency increases.
+
+### RR-26: Generic Exception Info Disclosure in HTTP Responses
+- **Severity:** Low
+- **Likelihood:** Low (requires unexpected exception during request processing)
+- **Description:** `server.py` catches broad `Exception` and returns `str(e)` in HTTP responses for `/ask` and `/plan`. Exception messages may contain internal file paths, library versions, or other implementation details.
+- **Recommendation:** Return a generic error message (`"Internal agent execution error"`) in HTTP responses; log the full exception server-side at ERROR level.
+
 ---
 
 ## 7. Token Isolation Matrix
@@ -429,14 +489,16 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 
 | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation of Privilege |
 |-----------|----------|-----------|-------------|-----------------|-----|----------------------|
-| **Caddy ingress** | Token theft (RR-8 no rate limit) | ~~tls_insecure_skip_verify~~ (RR-1 ✅) | No request audit log | Query content in logs (RR-17) | No rate limit (RR-8) | — |
-| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | Env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8) | ~~Slash command path traversal (RR-7)~~ ✅ |
+| **Caddy ingress** | Token theft (RR-8 no rate limit); unauthenticated /health (RR-22) | ~~tls_insecure_skip_verify~~ (RR-1 ✅) | No request audit log | Query content in logs (RR-17) | No rate limit (RR-8) | — |
+| **claude-server** | — | Prompt injection via workspace (§4.2) | Query logged at INFO (RR-17) | Unredacted stderr in errors (RR-24); exception info disclosure (RR-26); env vars in subprocess scope | Unlimited concurrent subprocesses (RR-8) | ~~Slash command path traversal (RR-7)~~ ✅ |
+| **docs_mcp.py** | — | — | — | startswith() prefix escape (RR-23) | — | — |
 | **mcp-watchdog** | — | Bypassed by crafted tool responses | — | — | — | — |
 | **files_mcp.py** | — | ~~URL param injection (RR-6)~~ ✅ | — | — | — | — |
 | **mcp-server (Go)** | — | — | ~~File content fully logged (RR-5)~~ ✅ | ~~File content in logs (RR-5)~~ ✅ | ~~No resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
 | **git-server** | — | Submodule path accepted without extra validation | — | Git history poisoning (§4.2) | — | — |
 | **plan-server** | — | ~~Plan content injection (RR-14)~~ ✅ | — | — | — | cap_drop: ALL ✓ |
 | **tester-server** | — | Test oracle manipulation (§4.2) | — | Test output injection (RR-13) | ~~No subprocess timeout (RR-2)~~ ✅; ~~no resource limits (RR-3)~~ ✅ | cap_drop: ALL ✓ |
+| **tester_mcp.py** | — | 3-strike race condition (RR-25) | — | — | — | — |
 | **log-server** | LOG_API_TOKEN theft | Log file tampering (host-level only) | Silent drops (RR-21) | Session metadata exfiltration via log_mcp (§4.2) | Log accumulation → disk exhaustion (RR-20) | cap_drop: ALL ✓ |
 | **proxy (LiteLLM)** | DYNAMIC_AGENT_KEY as master_key | ~~Model routing manipulation~~ (RR-15 ✅) | — | Real API key in memory (egress locked) | — | cap_drop: ALL ✓, read_only ✓, int_net only ✓ |
 | **Host / Volumes** | — | .secrets.env readable by host users | — | plans/, .git, logs/, certs on host disk | — | TA-5 insider |
@@ -486,5 +548,10 @@ Max-length constants + `_validate_field_lengths()` in `plan_server.py`. 11 unit 
 | **P4** | **RR-17** | Truncate query logging to 500 chars at INFO level | **Open** |
 | P4 | RR-13 | Document test output as trust boundary; add 64 KB output length cap | Open |
 | ~~P4~~ | ~~RR-15~~ | ~~Whitelist allowed model names in `/ask` and `/plan`~~ | ✅ Done 2026-03-30 |
+| **P3** | **RR-23** | Fix `startswith()` prefix matching in `docs_mcp.py` — append `os.sep` to base path | **Open** |
+| **P3** | **RR-24** | Apply `_redact_secrets()` to `result.stderr` before returning in HTTP responses | **Open** |
 | P4 | RR-10 | Add cert expiry monitoring; document rotation procedure | Open |
 | P4 | RR-21 | Document git history as primary audit trail; optionally expose dropped-event counter | Open |
+| P4 | RR-22 | Block `/health` at Caddy layer or document as accepted risk | Open |
+| P4 | RR-25 | Add `asyncio.Lock` to tester_mcp.py 3-strike globals | Open |
+| P4 | RR-26 | Return generic error messages in HTTP responses; log full exceptions server-side | Open |
