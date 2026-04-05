@@ -26,11 +26,13 @@ type LogEvent struct {
 	EventType  string `json:"event_type"` // llm_call|tool_call|file_read|file_write|test_run|git_op|plan_op
 
 	// llm_call fields
-	Model           string `json:"model,omitempty"`
-	InputTokens     int    `json:"input_tokens,omitempty"`
-	OutputTokens    int    `json:"output_tokens,omitempty"`
-	CacheReadTokens int    `json:"cache_read_tokens,omitempty"`
-	DurationMs      int64  `json:"duration_ms,omitempty"`
+	Model                string `json:"model,omitempty"`
+	InputTokens          int    `json:"input_tokens,omitempty"`
+	OutputTokens         int    `json:"output_tokens,omitempty"`
+	CacheReadTokens      int    `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens  int    `json:"cache_creation_tokens,omitempty"`
+	DurationMs           int64  `json:"duration_ms,omitempty"`
+	TurnNumber           int    `json:"turn_number,omitempty"`
 
 	// tool_call fields
 	ToolName          string `json:"tool_name,omitempty"`
@@ -401,12 +403,14 @@ func handleQueryLogs(token, logsDir string) http.HandlerFunc {
 
 // TokenRecord is one per-call entry in the token breakdown.
 type TokenRecord struct {
-	Timestamp       string `json:"timestamp"`
-	Model           string `json:"model"`
-	InputTokens     int    `json:"input_tokens"`
-	OutputTokens    int    `json:"output_tokens"`
-	CacheReadTokens int    `json:"cache_read_tokens"`
-	DurationMs      int64  `json:"duration_ms"`
+	Timestamp           string `json:"timestamp"`
+	Model               string `json:"model"`
+	InputTokens         int    `json:"input_tokens"`
+	OutputTokens        int    `json:"output_tokens"`
+	CacheReadTokens     int    `json:"cache_read_tokens"`
+	CacheCreationTokens int    `json:"cache_creation_tokens,omitempty"`
+	DurationMs          int64  `json:"duration_ms"`
+	TurnNumber          int    `json:"turn_number,omitempty"`
 }
 
 // handleGetTokens returns per-call token data for a session.
@@ -430,12 +434,14 @@ func handleGetTokens(token, logsDir string) http.HandlerFunc {
 				continue
 			}
 			records = append(records, TokenRecord{
-				Timestamp:       e.Timestamp,
-				Model:           e.Model,
-				InputTokens:     e.InputTokens,
-				OutputTokens:    e.OutputTokens,
-				CacheReadTokens: e.CacheReadTokens,
-				DurationMs:      e.DurationMs,
+				Timestamp:           e.Timestamp,
+				Model:               e.Model,
+				InputTokens:         e.InputTokens,
+				OutputTokens:        e.OutputTokens,
+				CacheReadTokens:     e.CacheReadTokens,
+				CacheCreationTokens: e.CacheCreationTokens,
+				DurationMs:          e.DurationMs,
+				TurnNumber:          e.TurnNumber,
 			})
 		}
 		if records == nil {

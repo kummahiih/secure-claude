@@ -190,3 +190,58 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
+
+// --- Token breakdown: turn_number and cache_creation_tokens ---
+
+func getTokens(t *testing.T, srv *httptest.Server, sessionID string) []TokenRecord {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/sessions/"+sessionID+"/tokens", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("tokens: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("tokens: expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		TokenBreakdown []TokenRecord `json:"token_breakdown"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode tokens: %v", err)
+	}
+	return out.TokenBreakdown
+}
+
+func TestTokensTurnNumberRoundTrip(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "tn1", "event_type": "llm_call",
+		"model": "claude-opus-4", "input_tokens": 100, "output_tokens": 50,
+		"cache_creation_tokens": 10, "turn_number": 1,
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "tn1", "event_type": "llm_call",
+		"model": "claude-opus-4", "input_tokens": 200, "output_tokens": 80,
+		"cache_creation_tokens": 20, "turn_number": 2,
+	})
+
+	records := getTokens(t, srv, "tn1")
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(records))
+	}
+	if records[0].TurnNumber != 1 {
+		t.Errorf("record[0]: expected turn_number=1, got %d", records[0].TurnNumber)
+	}
+	if records[0].CacheCreationTokens != 10 {
+		t.Errorf("record[0]: expected cache_creation_tokens=10, got %d", records[0].CacheCreationTokens)
+	}
+	if records[1].TurnNumber != 2 {
+		t.Errorf("record[1]: expected turn_number=2, got %d", records[1].TurnNumber)
+	}
+	if records[1].CacheCreationTokens != 20 {
+		t.Errorf("record[1]: expected cache_creation_tokens=20, got %d", records[1].CacheCreationTokens)
+	}
+}
