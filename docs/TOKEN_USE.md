@@ -352,7 +352,7 @@ Shorten `submodule_path` descriptions. Remove redundant async explanation from `
 | P2 | Split `ARCHITECTURE.md` → overview + detail; update system prompt | Documentation | ~7,000–9,000 tok/routine task | ~7,000–9,000 tok/task | Low | **Done** |
 | P2 | Archive TOKEN_USE §3 history; delete legacy `token_consumption_analysis.md`; exclude from routine reads | Context Hygiene | ~12,000 tok if read on non-analysis tasks | Caps doc growth; eliminates ~12k tok on routine tasks | Low | Open |
 | P2 | Add `wait=true` to `get_test_results` (server-side blocking) | Infrastructure | 1–2 poll round-trips/test (~39k–78k cache tok each) | 1–2 round-trips per tested task | Medium | Open |
-| P3 | Pre-spawn plan check in `server.py` — skip subprocess if no pending task | Infrastructure | ~22,301 tok + 13–18s per DONE call | 22k tok + startup cost per no-op | Low | Open |
+| P3 | Pre-spawn plan check in `server.py` — skip subprocess if no pending task | Infrastructure | ~22,301 tok + 13–18s per DONE call | 22k tok + startup cost per no-op | Low | **Done** |
 | P3 | Per-turn LLM event logging (parse `--output-format json`) | Observability | Round-trip counts invisible | Full turn-level visibility | Medium | Open |
 | P4 | Shorten `submodule_path` + remove redundant async explanation in tool descriptions | Tool Descriptions | ~500 tok/call (cached) | ~500 tok/call | Low | Open |
 | P4 | Enable SHA256 dedup detection for file reads via log analysis | Observability | Unknown (est. ~500–5k tok/dup) | Unknown until P1 observability | Low | Blocked (needs P1 instrumentation) |
