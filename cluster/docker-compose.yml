@@ -109,6 +109,49 @@ services:
       - ALL
     restart: unless-stopped
 
+  codex-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+    container_name: codex-server
+    user: "1000:1000"
+    environment:
+      - DYNAMIC_AGENT_KEY=${DYNAMIC_AGENT_KEY}
+      - OPENAI_BASE_URL=https://proxy:4000/v1
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - PLAN_API_TOKEN=${PLAN_API_TOKEN}
+      - TESTER_API_TOKEN=${TESTER_API_TOKEN}
+      - CODEX_API_TOKEN=${CODEX_API_TOKEN}
+      - GIT_API_TOKEN=${GIT_API_TOKEN}
+      - LOG_API_TOKEN=${LOG_API_TOKEN}
+      - MCP_SERVER_URL=https://mcp-server:8443
+      - PLAN_SERVER_URL=https://plan-server:8443
+      - TESTER_SERVER_URL=https://tester-server:8443
+      - GIT_SERVER_URL=https://git-server:8443
+      - LOG_SERVER_URL=https://log-server:8443
+      - NODE_EXTRA_CA_CERTS=/app/certs/ca.crt
+      - CURL_CA_BUNDLE=/app/certs/ca.crt
+      - REQUESTS_CA_BUNDLE=/app/certs/ca.crt
+      - SSL_CERT_FILE=/app/certs/ca.crt
+      - DOCS_DIR=/docs
+    volumes:
+      - ./workspace/docs:/docs:ro
+    networks:
+      - int_net
+    depends_on:
+      - mcp-server
+      - plan-server
+      - tester-server
+      - proxy
+      - git-server
+      - log-server
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 200
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
   mcp-server:
     build:
       context: .
