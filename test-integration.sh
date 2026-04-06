@@ -45,7 +45,7 @@ echo "[$(date +'%H:%M:%S')] 1/8: Validating Caddy Edge Router..."
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] 2/8: Lint Dockerfiles (Hadolint)..."
-DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan" "Dockerfile.tester" "Dockerfile.git" "Dockerfile.log")
+DOCKERFILES=("Dockerfile.caddy" "Dockerfile.claude" "Dockerfile.codex" "Dockerfile.mcp" "Dockerfile.proxy" "Dockerfile.plan" "Dockerfile.tester" "Dockerfile.git" "Dockerfile.log")
 (
   set +e
   for df in "${DOCKERFILES[@]}"; do
@@ -753,6 +753,121 @@ else
   LOG_RESOURCE_FAIL=1
 fi
 if [ "$LOG_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Codex-server isolation..."
+
+CODEX_HEALTH=$(docker exec codex-server curl -s -o /dev/null -w "%{http_code}" -k https://localhost:8000/health 2>/dev/null || echo "000")
+if [ "$CODEX_HEALTH" = "200" ]; then
+  echo "  ✅ codex-server healthy"
+else
+  echo "  ❌ codex-server not responding (HTTP $CODEX_HEALTH)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_VARS_CHECK=$(docker exec codex-server env 2>/dev/null | grep -E '(ANTHROPIC_API_KEY|CLAUDE_API_TOKEN)' || true)
+if [ -z "$CODEX_VARS_CHECK" ]; then
+  echo "  ✅ codex-server env var isolation clean"
+else
+  echo "  ❌ codex-server has forbidden env vars:"
+  echo "$CODEX_VARS_CHECK"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_TOKEN_CHECK=$(docker exec codex-server env 2>/dev/null | grep -E '^CODEX_API_TOKEN=' || true)
+if [ -n "$CODEX_TOKEN_CHECK" ]; then
+  echo "  ✅ codex-server has CODEX_API_TOKEN"
+else
+  echo "  ❌ codex-server missing CODEX_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_HAS_MCP=$(docker exec codex-server env 2>/dev/null | grep -E '^MCP_API_TOKEN=' || true)
+if [ -n "$CODEX_HAS_MCP" ]; then
+  echo "  ✅ codex-server has MCP_API_TOKEN"
+else
+  echo "  ❌ codex-server missing MCP_API_TOKEN"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Cross-agent token isolation..."
+
+CLAUDE_HAS_CODEX=$(docker exec claude-server env 2>/dev/null | grep -E '^CODEX_API_TOKEN=' || true)
+if [ -z "$CLAUDE_HAS_CODEX" ]; then
+  echo "  ✅ claude-server does not have CODEX_API_TOKEN"
+else
+  echo "  ❌ claude-server has CODEX_API_TOKEN (cross-contamination)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_HAS_CLAUDE=$(docker exec codex-server env 2>/dev/null | grep -E '^CLAUDE_API_TOKEN=' || true)
+if [ -z "$CODEX_HAS_CLAUDE" ]; then
+  echo "  ✅ codex-server does not have CLAUDE_API_TOKEN"
+else
+  echo "  ❌ codex-server has CLAUDE_API_TOKEN (cross-contamination)"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+echo "$(date +'%H:%M:%S') Checking codex-server resource limits..."
+CODEX_MEM=$(docker inspect codex-server --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
+CODEX_CPUS=$(docker inspect codex-server --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo "0")
+CODEX_PIDS=$(docker inspect codex-server --format '{{.HostConfig.PidsLimit}}' 2>/dev/null || echo "0")
+CODEX_CAPS=$(docker inspect codex-server --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+
+CODEX_RESOURCE_FAIL=0
+# mem_limit: 4g = 4294967296 bytes
+if [ "$CODEX_MEM" = "4294967296" ]; then
+  echo "  ✅ codex-server mem_limit: 4g"
+else
+  echo "  ❌ codex-server mem_limit wrong (got $CODEX_MEM, want 4294967296)"
+  CODEX_RESOURCE_FAIL=1
+fi
+# cpus: 2.0 = 2000000000 NanoCPUs
+if [ "$CODEX_CPUS" = "2000000000" ]; then
+  echo "  ✅ codex-server cpus: 2.0"
+else
+  echo "  ❌ codex-server cpus wrong (got $CODEX_CPUS, want 2000000000)"
+  CODEX_RESOURCE_FAIL=1
+fi
+if [ "$CODEX_PIDS" = "200" ]; then
+  echo "  ✅ codex-server pids_limit: 200"
+else
+  echo "  ❌ codex-server pids_limit wrong (got $CODEX_PIDS, want 200)"
+  CODEX_RESOURCE_FAIL=1
+fi
+if echo "$CODEX_CAPS" | grep -qi "ALL"; then
+  echo "  ✅ codex-server cap_drop: ALL"
+else
+  echo "  ❌ codex-server cap_drop missing ALL (got $CODEX_CAPS)"
+  CODEX_RESOURCE_FAIL=1
+fi
+if [ "$CODEX_RESOURCE_FAIL" -eq 1 ]; then
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_GITDIR_CHECK=$(docker exec codex-server ls /gitdir 2>&1 || true)
+if echo "$CODEX_GITDIR_CHECK" | grep -q "No such file"; then
+  echo "  ✅ codex-server cannot see /gitdir"
+else
+  echo "  ❌ codex-server can see /gitdir"
+  (cd cluster && docker-compose down 2>/dev/null)
+  exit 1
+fi
+
+CODEX_PLANS_CHECK=$(docker exec codex-server ls /plans 2>&1 || true)
+if echo "$CODEX_PLANS_CHECK" | grep -q "No such file"; then
+  echo "  ✅ codex-server cannot see /plans"
+else
+  echo "  ❌ codex-server can see /plans"
   (cd cluster && docker-compose down 2>/dev/null)
   exit 1
 fi
