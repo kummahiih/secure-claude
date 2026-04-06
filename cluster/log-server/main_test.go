@@ -245,3 +245,96 @@ func TestTokensTurnNumberRoundTrip(t *testing.T) {
 		t.Errorf("record[1]: expected cache_creation_tokens=20, got %d", records[1].CacheCreationTokens)
 	}
 }
+
+// --- File dedup ---
+
+func getFileDedup(t *testing.T, srv *httptest.Server, sessionID string, wantStatus int) []FileDedupEntry {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/sessions/"+sessionID+"/file-dedup", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("file-dedup: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("file-dedup: expected %d, got %d", wantStatus, resp.StatusCode)
+	}
+	if wantStatus != http.StatusOK {
+		return nil
+	}
+	var entries []FileDedupEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode file-dedup: %v", err)
+	}
+	return entries
+}
+
+func TestFileDedupBasic(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Two reads of the same file (sha256 = "abc123"), one unique.
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "fd1", "event_type": "file_read",
+		"path": "a.go", "size_bytes": 4000, "sha256": "abc123",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "fd1", "event_type": "file_read",
+		"path": "a.go", "size_bytes": 4000, "sha256": "abc123",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "fd1", "event_type": "file_read",
+		"path": "b.go", "size_bytes": 1000, "sha256": "def456",
+	})
+
+	entries := getFileDedup(t, srv, "fd1", http.StatusOK)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 dedup entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.SHA256 != "abc123" {
+		t.Errorf("expected sha256=abc123, got %s", e.SHA256)
+	}
+	if e.ReadCount != 2 {
+		t.Errorf("expected read_count=2, got %d", e.ReadCount)
+	}
+	if e.DuplicateReads != 1 {
+		t.Errorf("expected duplicate_reads=1, got %d", e.DuplicateReads)
+	}
+	if e.EstWastedTokens != 1000 {
+		t.Errorf("expected est_wasted_tokens=1000, got %d", e.EstWastedTokens)
+	}
+}
+
+func TestFileDedupNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	getFileDedup(t, srv, "no-such-session", http.StatusNotFound)
+}
+
+func TestFileDedupNoDuplicates(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "fd2", "event_type": "file_read",
+		"path": "a.go", "size_bytes": 500, "sha256": "aaa",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "fd2", "event_type": "file_read",
+		"path": "b.go", "size_bytes": 600, "sha256": "bbb",
+	})
+
+	entries := getFileDedup(t, srv, "fd2", http.StatusOK)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 dedup entries, got %d", len(entries))
+	}
+}
+
+func TestFileDedupUnauthorized(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/sessions/s1/file-dedup", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
