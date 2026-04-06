@@ -32,6 +32,7 @@ export GIT_API_TOKEN="integration-test-git-token"
 export LOG_API_TOKEN="integration-test-log-token"
 export ANTHROPIC_API_KEY="dummy-anthropic-key"
 export DYNAMIC_AGENT_KEY="dummy-dynamic-key"
+export CODEX_API_TOKEN="integration-test-codex-token"
 
 
 echo "========================================"
