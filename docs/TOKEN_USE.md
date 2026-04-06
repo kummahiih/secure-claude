@@ -129,6 +129,7 @@ Three sessions consumed >700k cache tokens each. Session 7ae06422 hit 7.1M cache
 | Cost ratio | Heavy sessions cost **17.4×** more than typical |
 | **Fix** | (1) Hard turn limit in `server.py` via `--max-turns` flag; (2) task decomposition in plans to keep each task ≤8 turns; (3) output token budget to prevent verbose generation |
 | **Effort** | Low (flag) / Medium (decomposition) |
+| **Status** | **Done** (`--max-turns 16` added to `claude --print` in `server.py:305`) |
 
 ### 4.3 Test Output Bloat — ✅ RESOLVED
 
@@ -297,7 +298,7 @@ Parse `--output-format json` for per-turn usage. Emit per-turn `llm_call` events
 
 | Priority | Item | Category | Current Waste | Expected Savings | Effort | Status |
 |----------|------|----------|---------------|------------------|--------|--------|
-| P0 | Add `--max-turns 16` to `claude --print` invocation | Runaway Prevention | Up to 7.1M cache tok/session ($1.95–$9.75) | Caps worst-case at ~560k cache | Low | Open |
+| P0 | Add `--max-turns 16` to `claude --print` invocation | Runaway Prevention | Up to 7.1M cache tok/session ($1.95–$9.75) | Caps worst-case at ~560k cache | Low | **Done** |
 | P0 | Default `/ask` to Sonnet — reserve Opus for explicit opt-in | Model Allocation | 5× cost premium on 10% of sessions | ~80% cost reduction on affected sessions | Low | Open |
 | P1 | Truncate test output on pass — return `{"status":"pass"}` only; last 50 lines on fail | Infrastructure | 2,000–15,000 tok/task in context | 2,000–15,000 tok/task | Low | **Done** |
 | P1 | Instrument mcp-server, tester-server, git-server to emit log events | Observability | All waste categories unquantifiable | Full per-tool visibility | Medium | **Done** |
