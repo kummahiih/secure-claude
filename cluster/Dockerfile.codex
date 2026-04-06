@@ -1,0 +1,154 @@
+FROM alpine:3.23.3 AS signer
+# Pinning openssl version for reproducibility
+RUN apk add --no-cache openssl=3.5.5-r0
+WORKDIR /certs
+
+# Securely mount the CA key from the host to sign the agent's unique cert
+
+RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \
+    --mount=type=bind,src=./certs/ca.crt,target=/tmp/ca.crt \
+    openssl genrsa -out agent.key 3072 && \
+    openssl req -new -key agent.key -out agent.csr -subj "/CN=codex-server" && \
+    echo "subjectAltName=DNS:localhost,DNS:codex-server,IP:127.0.0.1" > agent.ext && \
+    openssl x509 -req -in agent.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key -CAcreateserial \
+    -out agent.crt -days 365 -sha256 -extfile agent.ext
+
+FROM python:3.12-slim@sha256:3d5ed973e45820f5ba5e46bd065bd88b3a504ff0724d85980dcd05eab361fcf4
+
+# Prevent Python from writing pyc files to disk and ensure logs are output instantly
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 2. Switch to root temporarily to perform the system-level installation
+USER root
+
+
+
+# Create the non-root user and group (UID 1000)
+RUN addgroup --gid 1000 appgroup && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the requirements file into the container
+COPY agent/claude/requirements.txt /tmp/requirements.txt
+
+# Install dependencies from the file
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# the baseimage is pinned down so this is also pinned down
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @openai/codex@0.1.2505302101
+
+RUN mkdir -p /home/appuser/.codex && \
+    chown -R appuser:appgroup /home/appuser
+
+RUN mkdir -p /home/appuser/sandbox && chown appuser:appgroup /home/appuser/sandbox
+
+RUN mkdir -p /home/appuser/sandbox && \
+    chown appuser:appgroup /home/appuser/sandbox && \
+    chmod 500 /home/appuser/sandbox
+
+# Write MCP config at build time — it's static, not a secret.
+# This is the authoritative runtime config. The agent repo has a
+# reference copy at docs/mcp-tools.json with full tool schemas.
+COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
+{
+  "mcpServers": {
+    "fileserver": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/files_mcp.py"]
+    },
+    "git": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/git_mcp.py"]
+    },
+    "docs": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/docs_mcp.py"]
+    },
+     "planner": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/plan_mcp.py"]
+     },
+     "tester": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/tester_mcp.py"]
+     },
+     "logs": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/log_mcp.py"]
+     }
+  }
+}
+EOF
+
+# Copy Certificates from the Signer stage
+# We take the leaf cert, the leaf key, and the public CA cert
+COPY --from=signer /certs/agent.crt /app/certs/agent.crt
+COPY --from=signer /certs/agent.key /app/certs/agent.key
+COPY ./certs/ca.crt /app/certs/ca.crt
+
+# Trust the CA at the system and Python level
+RUN cat /app/certs/ca.crt >> "$(python -c 'import certifi; print(certifi.where())')" && \
+    cp /app/certs/ca.crt /usr/local/share/ca-certificates/internal-ca.crt && \
+    update-ca-certificates
+
+# Set permissions
+RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
+
+# Copy the server script and enforce correct ownership
+COPY --chown=appuser:appgroup agent/claude/*.py .
+COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
+COPY --chown=appuser:appgroup planner/planner/plan_mcp.py /app/plan_mcp.py
+
+
+# Lock down /app - readable but not writable by appuser
+RUN chmod -R 550 /app && \
+    chmod 440 /app/certs/ca.crt && \
+    chmod 400 /app/certs/agent.key && \
+    chown -R appuser:appgroup /app
+
+# System prompts — read by runenv.py at startup
+COPY --chmod=444 agent/prompts/system/ /app/prompts/
+
+# Slash commands — discovered by Codex at runtime
+# The .codex/ directory tree must exist and be traversable by appuser,
+# but the files themselves and the commands/ dir are immutable.
+RUN mkdir -p /home/appuser/.codex/commands
+COPY --chmod=444 agent/prompts/commands/ /home/appuser/.codex/commands/
+
+# Lock down the directory tree:
+#   - .codex/ and commands/ owned by root, mode 555 (r-x for all, no write)
+#   - prompt files owned by root, mode 444 (r-- for all, no write)
+# appuser can traverse and read, but cannot create, rename, or delete anything.
+RUN chown -R root:root /home/appuser/.codex \
+ && chmod 555 /home/appuser/.codex \
+ && chmod 555 /home/appuser/.codex/commands
+
+# Same for system prompts
+RUN chown -R root:root /app/prompts \
+ && chmod 555 /app/prompts
+
+
+# Explicitly switch to the non-root user before running any code
+USER appuser
+
+# Hint: Codex routes LLM traffic via OPENAI_BASE_URL (set at runtime)
+# ENV OPENAI_BASE_URL is injected by docker-compose, not baked here.
+
+# Expose the port that the Caddy sidecar will route traffic to
+EXPOSE 8000
+
+# Launch the server
+CMD ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=1m --timeout=5s \
+  CMD pgrep -f "python" || exit 1
