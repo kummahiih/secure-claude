@@ -38,6 +38,7 @@ cp .secrets.env.example .secrets.env
 Add your Anthropic key to `.secrets.env`:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...          # Optional: required only for codex-server
 ```
 *(To use a Pro subscription OAuth token, run `npm install -g @anthropic-ai/claude-code`, then `claude login` and `claude setup-token`, and copy the token into your `.secrets.env`)*
 
@@ -62,25 +63,28 @@ Start the infrastructure, create a plan, and unleash the agent.
 
 ## System Architecture
 
-The environment relies on seven containers orchestrated by Docker Compose. The `/workspace` mount is swappable, allowing you to point it at any repository that follows the [workspace interface spec](docs/WORKSPACE_INTERFACE.md).
+The environment relies on nine containers orchestrated by Docker Compose. The `/workspace` mount is swappable, allowing you to point it at any repository that follows the [workspace interface spec](docs/WORKSPACE_INTERFACE.md).
 
 ```text
 Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
-     └─> claude-server:8000 (FastAPI + Claude Code)
-          ├─> proxy:4000 (LiteLLM) ──> Anthropic API (no direct external access; int_net only)
-          ├─> MCP stdio servers (inside claude-server)
-          ├─> mcp-server:8443 (Go REST, filesystem jail)
-          │    └─> /workspace (bind mount → active sub-repo)
-          ├─> plan-server:8443 (Python REST, plan state)
-          │    └─> /plans (bind mount → plans/)
-          ├─> tester-server:8443 (Go REST, test runner)
-          │    └─> /workspace:ro (bind mount → active sub-repo)
-          ├─> git-server:8443 (Go REST, git operations)
-          │    ├─> /workspace:ro (bind mount → active sub-repo)
-          │    └─> /gitdir (bind mount → active sub-repo .git, rw)
-          └─> log-server:8443 (Go REST, structured session logs)
-               └─> /logs (bind mount → logs/)
+     ├─> claude-server:8000 (FastAPI + Claude Code)
+     │    ├─> MCP stdio servers (inside claude-server)
+     │    └─> proxy:4000 (LiteLLM) ──> Anthropic API (no direct external access; int_net only)
+     ├─> codex-server:8000 (FastAPI + OpenAI Codex)
+     │    ├─> MCP stdio servers (inside codex-server)
+     │    └─> proxy:4000 (LiteLLM) ──> OpenAI API (via caddy-sidecar)
+     ├─> mcp-server:8443 (Go REST, filesystem jail)
+     │    └─> /workspace (bind mount → active sub-repo)
+     ├─> plan-server:8443 (Python REST, plan state)
+     │    └─> /plans (bind mount → plans/)
+     ├─> tester-server:8443 (Go REST, test runner)
+     │    └─> /workspace:ro (bind mount → active sub-repo)
+     ├─> git-server:8443 (Go REST, git operations)
+     │    ├─> /workspace:ro (bind mount → active sub-repo)
+     │    └─> /gitdir (bind mount → active sub-repo .git, rw)
+     └─> log-server:8443 (Go REST, structured session logs)
+          └─> /logs (bind mount → logs/)
 ```
 
 ### Sub-Repositories

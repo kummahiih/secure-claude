@@ -8,12 +8,13 @@
 
 ## System Components
 
-Eight containers run on an internal Docker network (`int_net`):
+Nine containers run on an internal Docker network (`int_net`):
 
 | Service | Role | Technology | Port |
 |:---|:---|:---|:---|
 | **caddy-sidecar** | TLS termination, external ingress, egress proxy | Caddy 2 Alpine | `:8443` (ingress), `:8081` (egress → `api.anthropic.com` only) |
 | **claude-server** | Main app server; spawns Claude Code CLI + 6 MCP stdio servers | Python/FastAPI, Claude Code CLI `@2.1.74` | `:8000` |
+| **codex-server** | Parallel agent; spawns OpenAI Codex CLI + MCP stdio servers | Python/FastAPI, OpenAI Codex | `:8000` |
 | **proxy** | LLM API gateway; holds real `ANTHROPIC_API_KEY` | LiteLLM (pinned Docker image) | `:4000` |
 | **mcp-server** | Filesystem operations; `os.OpenRoot` jail at `/workspace` | Go REST | `:8443` |
 | **git-server** | Git operations (status/diff/add/commit/log/reset) | Go REST | `:8443` |
@@ -86,7 +87,7 @@ The agent **never** holds `ANTHROPIC_API_KEY`.
 | Reverse proxy / TLS | Caddy 2 (internal CA, TLS 1.3 minimum) |
 | MCP transport | stdio wrappers → HTTPS REST; `mcp-watchdog` intercepts all JSON-RPC |
 | Plan format | JSON (stored in `plans/` directory) |
-| Container runtime | Docker / Docker Compose (8 containers) |
+| Container runtime | Docker / Docker Compose (9 containers) |
 | Test tooling (tester image) | Python 3.12, pytest 8.3.4, Go 1.26.1 |
 | Security scanning | govulncheck, pip-audit, hadolint, trivy (`test-integration.sh`) |
 
@@ -161,9 +162,10 @@ secure-claude/
 │   ├── planner/            # Planner submodule
 │   ├── tester/             # Tester server submodule (Go)
 │   ├── Dockerfile.claude   # claude-server image
+│   ├── Dockerfile.codex    # codex-server image
 │   ├── Dockerfile.caddy    # caddy-sidecar image
 │   ├── Dockerfile.tester   # tester-server image
-│   ├── docker-compose.yml  # 8-container cluster definition
+│   ├── docker-compose.yml  # 9-container cluster definition
 │   ├── Caddyfile           # Reverse proxy + egress config
 │   ├── workspace/          # Symlink → active sub-repo
 │   └── certs/              # Internal CA + leaf certs

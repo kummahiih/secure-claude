@@ -22,29 +22,32 @@ Repos:
 ```
 Host / Network
 └─> Caddy:8443 (TLS 1.3 + reverse proxy)
-     └─> claude-server:8000 (FastAPI + Claude Code subprocess)
-          ├─> proxy:4000 (LiteLLM) ──> caddy-sidecar:8081 ──> Anthropic API
-          ├─> MCP stdio servers (inside claude-server):
-          │    ├─> files_mcp.py  → HTTPS REST → mcp-server:8443
-          │    ├─> git_mcp.py    → HTTPS REST → git-server:8443
-          │    ├─> docs_mcp.py   → reads /docs (read-only mount)
-          │    ├─> plan_mcp.py   → HTTPS REST → plan-server:8443
-          │    ├─> tester_mcp.py → HTTPS REST → tester-server:8443
-          │    └─> log_mcp.py    → HTTPS REST → log-server:8443
-          ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
-          │    └─> /workspace (bind mount → active sub-repo)
-          ├─> git-server:8443 (Go REST, git operations)
-          │    ├─> /gitdir (bind mount → workspace/.git)
-          │    └─> /workspace:ro (bind mount → active sub-repo)
-          ├─> plan-server:8443 (Python REST, JSON plan files)
-          │    └─> /plans (bind mount → plans/)
-          ├─> tester-server:8443 (Go REST, test runner)
-          │    └─> /workspace:ro (bind mount → active sub-repo)
-          └─> log-server:8443 (Go REST, structured session logs)
-               └─> /logs (bind mount → logs/)
+     ├─> claude-server:8000 (FastAPI + Claude Code subprocess)
+     │    ├─> proxy:4000 (LiteLLM) ──> caddy-sidecar:8081 ──> Anthropic API
+     │    └─> MCP stdio servers (inside claude-server):
+     │         ├─> files_mcp.py  → HTTPS REST → mcp-server:8443
+     │         ├─> git_mcp.py    → HTTPS REST → git-server:8443
+     │         ├─> docs_mcp.py   → reads /docs (read-only mount)
+     │         ├─> plan_mcp.py   → HTTPS REST → plan-server:8443
+     │         ├─> tester_mcp.py → HTTPS REST → tester-server:8443
+     │         └─> log_mcp.py    → HTTPS REST → log-server:8443
+     ├─> codex-server:8000 (FastAPI + OpenAI Codex subprocess)
+     │    ├─> proxy:4000 (LiteLLM) ──> caddy-sidecar:8081 ──> OpenAI API
+     │    └─> MCP stdio servers (inside codex-server)
+     ├─> mcp-server:8443 (Go REST, os.OpenRoot jail)
+     │    └─> /workspace (bind mount → active sub-repo)
+     ├─> git-server:8443 (Go REST, git operations)
+     │    ├─> /gitdir (bind mount → workspace/.git)
+     │    └─> /workspace:ro (bind mount → active sub-repo)
+     ├─> plan-server:8443 (Python REST, JSON plan files)
+     │    └─> /plans (bind mount → plans/)
+     ├─> tester-server:8443 (Go REST, test runner)
+     │    └─> /workspace:ro (bind mount → active sub-repo)
+     └─> log-server:8443 (Go REST, structured session logs)
+          └─> /logs (bind mount → logs/)
 ```
 
-### Eight containers, all on internal Docker network (int_net):
+### Nine containers, all on internal Docker network (int_net):
 
 | Service | Description | Isolation checks |
 | :--- | :--- | :--- |
@@ -55,6 +58,7 @@ Host / Network
 | plan-server | Python REST server, plan state in /plans | plan_server.py (10 checks) |
 | git-server | Go REST server, git operations (status/diff/add/commit/log/reset) | entrypoint.sh (env + token scan) |
 | tester-server | Go REST server, runs /workspace/test.sh as subprocess | entrypoint.sh (env scan + /workspace check) |
+| codex-server | FastAPI + OpenAI Codex CLI subprocess + MCP stdio servers | verify_isolation.py |
 | log-server | Go REST server, structured session log storage and queries | entrypoint.sh (env scan + /logs check) |
 
 ### MCP tool sets available to Claude Code:
@@ -160,16 +164,17 @@ Enforce boundaries structurally, never by filtering.
 
 ### Token isolation matrix:
 
-| Token | claude-server | proxy | mcp-server | plan-server | tester-server | git-server | log-server | caddy |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| GIT_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
-| LOG_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
+| Token | claude-server | codex-server | proxy | mcp-server | plan-server | tester-server | git-server | log-server | caddy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| ANTHROPIC_API_KEY | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CODEX_API_TOKEN | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| MCP_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| PLAN_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| TESTER_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| GIT_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| LOG_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
 
 ---
 
