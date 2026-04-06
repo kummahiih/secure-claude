@@ -453,6 +453,86 @@ func handleGetTokens(token, logsDir string) http.HandlerFunc {
 	}
 }
 
+// FileDedupEntry is one entry in the file-dedup response.
+type FileDedupEntry struct {
+	SHA256          string `json:"sha256"`
+	Path            string `json:"path"`
+	Bytes           int    `json:"bytes"`
+	ReadCount       int    `json:"read_count"`
+	DuplicateReads  int    `json:"duplicate_reads"`
+	EstWastedTokens int    `json:"est_wasted_tokens"`
+}
+
+// handleGetFileDedup groups file_read events by sha256 and surfaces duplicates.
+// GET /sessions/{id}/file-dedup
+func handleGetFileDedup(token, logsDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id := r.PathValue("id")
+
+		// 404 if session file does not exist.
+		if _, err := os.Stat(sessionPath(logsDir, id)); os.IsNotExist(err) {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		events, err := readEvents(logsDir, id)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		type entry struct {
+			path      string
+			bytes     int
+			readCount int
+		}
+		byHash := make(map[string]*entry)
+		// Preserve insertion order for deterministic first-seen path.
+		var order []string
+		for _, e := range events {
+			if e.EventType != "file_read" || e.SHA256 == "" {
+				continue
+			}
+			if _, ok := byHash[e.SHA256]; !ok {
+				byHash[e.SHA256] = &entry{path: e.Path, bytes: e.SizeBytes}
+				order = append(order, e.SHA256)
+			}
+			byHash[e.SHA256].readCount++
+		}
+
+		var result []FileDedupEntry
+		for _, h := range order {
+			en := byHash[h]
+			if en.readCount <= 1 {
+				continue
+			}
+			dups := en.readCount - 1
+			result = append(result, FileDedupEntry{
+				SHA256:          h,
+				Path:            en.path,
+				Bytes:           en.bytes,
+				ReadCount:       en.readCount,
+				DuplicateReads:  dups,
+				EstWastedTokens: dups * en.bytes / 4,
+			})
+		}
+
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].EstWastedTokens > result[j].EstWastedTokens
+		})
+		if result == nil {
+			result = []FileDedupEntry{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result) //nolint:errcheck
+	}
+}
+
 // setupRouter wires all endpoints. Exported for testing.
 func setupRouter(token, logsDir string) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -462,6 +542,7 @@ func setupRouter(token, logsDir string) *http.ServeMux {
 	mux.HandleFunc("GET /sessions/{id}/summary", handleGetSummary(token, logsDir))
 	mux.HandleFunc("POST /sessions/{id}/query", handleQueryLogs(token, logsDir))
 	mux.HandleFunc("GET /sessions/{id}/tokens", handleGetTokens(token, logsDir))
+	mux.HandleFunc("GET /sessions/{id}/file-dedup", handleGetFileDedup(token, logsDir))
 	return mux
 }
 
