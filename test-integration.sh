@@ -192,6 +192,26 @@ echo "[+] Scanning Claude Code JS deps (npm audit)..."
   fi
 ) || echo "  ⚠️  npm audit section failed"
 
+echo "[+] Scanning Codex JS deps (npm audit)..."
+(
+  set +e
+  TMPDIR=$(mktemp -d)
+  CODEX_CTR="npm-audit-codex-tmp-$$"
+  docker create --name "$CODEX_CTR" cluster-codex-server >/dev/null 2>&1
+  docker cp "$CODEX_CTR":/usr/lib/node_modules/@openai/codex "$TMPDIR/codex" 2>/dev/null
+  docker rm "$CODEX_CTR" >/dev/null 2>&1
+  CODEX_NPM_OUT=$(cd "$TMPDIR/codex" && npm i --package-lock-only --ignore-scripts 2>/dev/null && npm audit --omit=dev 2>&1) || true
+  rm -rf "$TMPDIR"
+  if echo "$CODEX_NPM_OUT" | grep -q "found 0 vulnerabilities"; then
+    echo "  ✅ codex npm audit clean"
+  elif [ -z "$CODEX_NPM_OUT" ]; then
+    echo "  ⚠️  codex npm audit produced no output"
+  else
+    echo "  ⚠️  codex npm audit:"
+    echo "$CODEX_NPM_OUT" | grep -E '(found|vulnerabilities|severity|Severity)' | tail -5
+  fi
+) || echo "  ⚠️  codex npm audit section failed"
+
 
 echo "========================================"
 echo "  DOCKER INTEGRATION TESTS"
