@@ -28,6 +28,24 @@
 }
 
 
+# --- INGRESS: Access to Codex Agent ---
+:8444 {
+    request_body {
+        max_size 256KB
+    }
+
+    tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
+
+    handle {
+        reverse_proxy https://codex-server:8000 {
+            transport http {
+                tls_trusted_ca_certs /etc/caddy/certs/ca.crt
+            }
+        }
+    }
+}
+
+
 # --- EGRESS: Anthropic API only ---
 # LiteLLM proxy routes outbound Anthropic calls through this endpoint.
 # Only api.anthropic.com is permitted — all other upstream targets are blocked.
