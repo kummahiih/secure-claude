@@ -60,3 +60,18 @@
         }
     }
 }
+
+# --- EGRESS: OpenAI API only ---
+# LiteLLM proxy routes outbound OpenAI/Codex calls through this endpoint.
+# Only api.openai.com is permitted — all other upstream targets are blocked.
+:8082 {
+    tls /etc/caddy/certs/caddy.crt /etc/caddy/certs/caddy.key
+
+    reverse_proxy https://api.openai.com:443 {
+        # Preserve the original Host header so OpenAI sees the correct SNI/Host
+        header_up Host api.openai.com
+        transport http {
+            tls_server_name api.openai.com
+        }
+    }
+}

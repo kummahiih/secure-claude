@@ -24,16 +24,19 @@ model_list:
     litellm_params:
       model: openai/gpt-4o
       api_key: "os.environ/OPENAI_API_KEY"
+      api_base: https://caddy-sidecar:8082
 
   - model_name: gpt-5.3-codex
     litellm_params:
       model: openai/gpt-5.3-codex
       api_key: "os.environ/OPENAI_API_KEY"
+      api_base: https://caddy-sidecar:8082
 
   - model_name: o3
     litellm_params:
       model: openai/o3
       api_key: "os.environ/OPENAI_API_KEY"
+      api_base: https://caddy-sidecar:8082
 
 general_settings:
   master_key: "os.environ/DYNAMIC_AGENT_KEY"
