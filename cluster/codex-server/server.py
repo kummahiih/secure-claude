@@ -229,21 +229,36 @@ def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[object, i
         cmd += ["--instructions", system_prompt]
     cmd += [query]
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         cwd="/home/appuser/sandbox",
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=600,
         env=env,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=600)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
+
     duration_ms = int((time.monotonic() - t0) * 1000)
-    logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
-    logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
-    logger.debug(f"returncode: {result.returncode}")
+    logger.debug(f"stdout: {_redact_secrets(stdout)!r}")
+    logger.debug(f"stderr: {_redact_secrets(stderr)!r}")
+    logger.debug(f"returncode: {proc.returncode}")
     logger.info(
-        f"Subagent completed: returncode={result.returncode} "
-        f"stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}"
+        f"Subagent completed: returncode={proc.returncode} "
+        f"stdout_bytes={len(stdout)} stderr_bytes={len(stderr)}"
+    )
+    if proc.returncode != 0:
+        _check_upstream_errors(stderr)
+    result = subprocess.CompletedProcess(
+        args=cmd,
+        returncode=proc.returncode,
+        stdout=stdout,
+        stderr=stderr,
     )
     return result, duration_ms
 
