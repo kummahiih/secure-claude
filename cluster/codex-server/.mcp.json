@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "fileserver": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/files_mcp.py"],
+      "env": {
+        "MCP_API_TOKEN": "${MCP_API_TOKEN}",
+        "MCP_SERVER_URL": "https://mcp-server:8443"
+      }
+    },
+    "git": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/git_mcp.py"],
+      "env": {
+        "GIT_API_TOKEN": "${GIT_API_TOKEN}",
+        "GIT_SERVER_URL": "https://git-server:8443"
+      }
+    },
+    "docs": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/docs_mcp.py"]
+    },
+    "planner": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/plan_mcp.py"],
+      "env": {
+        "PLAN_API_TOKEN": "${PLAN_API_TOKEN}",
+        "PLAN_SERVER_URL": "https://plan-server:8443"
+      }
+    },
+    "tester": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/tester_mcp.py"],
+      "env": {
+        "TESTER_API_TOKEN": "${TESTER_API_TOKEN}",
+        "TESTER_SERVER_URL": "https://tester-server:8443"
+      }
+    },
+    "logs": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/log_mcp.py"],
+      "env": {
+        "LOG_API_TOKEN": "${LOG_API_TOKEN}",
+        "LOG_SERVER_URL": "https://log-server:8443"
+      }
+    }
+  }
+}
