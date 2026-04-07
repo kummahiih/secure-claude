@@ -19,9 +19,7 @@
     "docs": {
       "command": "mcp-watchdog",
       "args": ["--verbose", "--", "python3", "/app/docs_mcp.py"],
-      "env": {
-        "DOCS_DIR": "/docs"
-      }
+      "env": {}
     },
     "planner": {
       "command": "mcp-watchdog",
