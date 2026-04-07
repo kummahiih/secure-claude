@@ -104,9 +104,11 @@ RUN cat /app/certs/ca.crt >> "$(python -c 'import certifi; print(certifi.where()
 # Set permissions
 RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 
-# Copy the server script and enforce correct ownership
+# Copy shared MCP helpers and utilities from the claude agent
 COPY --chown=appuser:appgroup agent/claude/*.py .
-COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
+# Override server.py with the codex-specific FastAPI server
+COPY --chown=appuser:appgroup codex-server/server.py /app/server.py
+COPY --chown=appuser:appgroup codex-server/entrypoint.sh /app/entrypoint.sh
 COPY --chown=appuser:appgroup planner/planner/plan_mcp.py /app/plan_mcp.py
 
 
