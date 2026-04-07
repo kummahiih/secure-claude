@@ -125,7 +125,13 @@ PATH_BLACKLIST = [
 ]
 
 
-def _expand_slash_command(query: str) -> str:
+def load_slash_command(query: str) -> str:
+    """Expand a /command query to its markdown file contents.
+
+    Raises HTTP 400 if the command name contains path-traversal characters.
+    Returns the original query unchanged if it is not a slash command or the
+    command file does not exist.
+    """
     if not query.startswith("/"):
         return query
     parts = query[1:].split()
@@ -134,7 +140,10 @@ def _expand_slash_command(query: str) -> str:
     name = os.path.basename(parts[0])
     if not name or any(bad in name for bad in PATH_BLACKLIST):
         logger.warning(f"Rejected potentially malicious slash command: {query!r}")
-        return query
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid slash command name — path traversal characters are not allowed.",
+        )
     cmd_path = os.path.join(COMMANDS_DIR, f"{name}.md")
     if os.path.isfile(cmd_path):
         logger.info(f"Expanding slash command /{name} from {cmd_path}")
@@ -142,6 +151,10 @@ def _expand_slash_command(query: str) -> str:
             return fh.read()
     logger.warning(f"Unknown slash command: /{name}")
     return query
+
+
+# Keep old name as alias for backwards compatibility
+_expand_slash_command = load_slash_command
 
 
 # ---------------------------------------------------------------------------
