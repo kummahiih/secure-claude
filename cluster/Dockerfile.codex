@@ -56,11 +56,39 @@ RUN mkdir -p /home/appuser/sandbox && \
     chown appuser:appgroup /home/appuser/sandbox && \
     chmod 500 /home/appuser/sandbox
 
-# Bake MCP config into the image at build time — static, not a secret.
-# Owned root:root mode 444 so the agent (UID 1000) cannot modify it at runtime.
-# mcp-watchdog (installed via agent/claude/requirements.txt) intercepts all
-# JSON-RPC traffic between Codex and the *_mcp.py stdio wrappers.
-COPY --chown=root:root --chmod=444 cluster/codex-server/.mcp.json /home/appuser/sandbox/.mcp.json
+# Write MCP config at build time — it's static, not a secret.
+# This is the authoritative runtime config. The agent repo has a
+# reference copy at docs/mcp-tools.json with full tool schemas.
+COPY --chown=appuser:appgroup <<EOF /home/appuser/sandbox/.mcp.json
+{
+  "mcpServers": {
+    "fileserver": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/files_mcp.py"]
+    },
+    "git": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/git_mcp.py"]
+    },
+    "docs": {
+      "command": "mcp-watchdog",
+      "args": ["--verbose", "--", "python3", "/app/docs_mcp.py"]
+    },
+     "planner": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/plan_mcp.py"]
+     },
+     "tester": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/tester_mcp.py"]
+     },
+     "logs": {
+       "command": "mcp-watchdog",
+       "args": ["--verbose", "--", "python3", "/app/log_mcp.py"]
+     }
+  }
+}
+EOF
 
 # Copy Certificates from the Signer stage
 # We take the leaf cert, the leaf key, and the public CA cert
