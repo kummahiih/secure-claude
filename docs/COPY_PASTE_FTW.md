@@ -100,11 +100,11 @@ plan that silently skips test registration.
 - `Copy: path traversal on src is rejected` — `src=../etc/passwd`
 - `Copy: path traversal on dst is rejected` — `dst=../etc/evil`
 
-**MCP tool registration** (in `cluster/agent/claude/files_mcp.py`):
+**MCP tool registration** (in `cluster/agent/mcp/files_mcp.py`):
 - Add `copy_file` to `list_tools()` with schema `{src: string, dst: string,
   overwrite?: boolean}`.
 - Add branch in `_dispatch()` that posts to `{MCP_SERVER_URL}/copy`.
-- Add Python unit tests in `cluster/agent/claude/files_mcp_test.py`:
+- Add Python unit tests in `cluster/agent/mcp/files_mcp_test.py`:
   `test_copy_file_success`, `test_copy_file_overwrite_success`,
   `test_copy_file_not_found`, `test_copy_file_conflict`.
 
@@ -136,10 +136,10 @@ plan that silently skips test registration.
 - `Diff: path traversal on a is rejected`
 - `Diff: path traversal on b is rejected`
 
-**MCP tool registration** (in `cluster/agent/claude/files_mcp.py`):
+**MCP tool registration** (in `cluster/agent/mcp/files_mcp.py`):
 - Add `diff_files` to `list_tools()` with schema `{path_a: string, path_b: string}`.
 - Add branch in `_dispatch()` that GETs `{MCP_SERVER_URL}/diff?a=...&b=...`.
-- Add Python unit tests in `cluster/agent/claude/files_mcp_test.py`:
+- Add Python unit tests in `cluster/agent/mcp/files_mcp_test.py`:
   `test_diff_files_identical`, `test_diff_files_changed`, `test_diff_files_not_found`.
 
 ---
@@ -231,7 +231,7 @@ missing file a (404), traversal on a rejected, traversal on b rejected.
 ### Task 6 — Register `copy_file` MCP tool in `files_mcp.py`
 
 **Files:**
-- `cluster/agent/claude/files_mcp.py`
+- `cluster/agent/mcp/files_mcp.py`
 
 **Action:**  
 In `list_tools()`, add a `types.Tool` for `copy_file` with schema
@@ -248,7 +248,7 @@ other → `RuntimeError`.
 ### Task 7 — Add Python unit tests for `copy_file` in `files_mcp_test.py`
 
 **Files:**
-- `cluster/agent/claude/files_mcp_test.py`
+- `cluster/agent/mcp/files_mcp_test.py`
 
 **Action:**  
 Add four async test functions (decorated with `@patch("files_mcp.requests.post")`):
@@ -264,7 +264,7 @@ tests passing.
 ### Task 8 — Register `diff_files` MCP tool in `files_mcp.py`
 
 **Files:**
-- `cluster/agent/claude/files_mcp.py`
+- `cluster/agent/mcp/files_mcp.py`
 
 **Action:**  
 In `list_tools()`, add a `types.Tool` for `diff_files` with schema
@@ -281,7 +281,7 @@ other → `RuntimeError`.
 ### Task 9 — Add Python unit tests for `diff_files` in `files_mcp_test.py`
 
 **Files:**
-- `cluster/agent/claude/files_mcp_test.py`
+- `cluster/agent/mcp/files_mcp_test.py`
 
 **Action:**  
 Add three async test functions (decorated with `@patch("files_mcp.requests.get")`):

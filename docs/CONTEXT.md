@@ -212,7 +212,7 @@ Enforce boundaries structurally, never by filtering.
 | Tester workspace access | Read-only mount | Read-write | Tests should never modify source |
 | Security scans location | test-integration.sh only | Sub-repo test.sh | Vuln DB fetches need network; sub-repo tests run in network-isolated tester |
 | Tester repo | Separate submodule (cluster/tester/) | Directory in parent | Consistent with agent/planner pattern; independently developable |
-| Tester MCP wrapper location | agent/claude/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
+| Tester MCP wrapper location | agent/mcp/tester_mcp.py | tester submodule | Co-located with other MCP wrappers; picked up by existing Dockerfile glob |
 | Submodule git routing | parse_gitmodules + git_env_for in git_mcp.py | Separate tool per submodule | Single tool surface; auto-detection from file paths; per-submodule baseline floors |
 | Proxy external network access | Removed (int_net only, egress via caddy-sidecar) | Direct internet from proxy container | Security decision: prevents proxy from exfiltrating ANTHROPIC_API_KEY or reaching external hosts directly; all outbound traffic is funnelled through caddy-sidecar for visibility and control |
 
