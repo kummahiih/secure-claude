@@ -106,6 +106,7 @@ RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 
 # Copy the server script and enforce correct ownership
 COPY --chown=appuser:appgroup agent/claude/*.py .
+COPY --chown=appuser:appgroup agent/isolation/verify_isolation.py .
 COPY --chown=appuser:appgroup agent/mcp/*.py .
 COPY --chown=appuser:appgroup agent/claude/entrypoint.sh /app/entrypoint.sh
 COPY --chown=appuser:appgroup planner/planner/plan_mcp.py /app/plan_mcp.py
