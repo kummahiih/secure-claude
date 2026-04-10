@@ -106,6 +106,7 @@ RUN chown -R appuser:appgroup /app/certs && chmod 600 /app/certs/agent.key
 
 # Copy shared MCP helpers and utilities from the claude agent
 COPY --chown=appuser:appgroup agent/claude/*.py .
+COPY --chown=appuser:appgroup agent/mcp/*.py .
 # Override server.py with the codex-specific FastAPI server
 COPY --chown=appuser:appgroup codex-server/server.py /app/server.py
 COPY --chown=appuser:appgroup codex-server/entrypoint.sh /app/entrypoint.sh
