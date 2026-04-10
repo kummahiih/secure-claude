@@ -157,7 +157,8 @@ Each mounted workspace must provide:
 secure-claude/
 ├── cluster/
 │   ├── agent/              # MCP wrappers + system prompts (submodule)
-│   │   ├── claude/         # MCP stdio wrappers
+│   │   ├── claude/         # FastAPI server + isolation checks
+│   │   ├── mcp/            # MCP stdio wrappers
 │   │   └── prompts/        # system/ (ask.md, plan.md) + commands/
 │   ├── planner/            # Planner submodule
 │   ├── tester/             # Tester server submodule (Go)

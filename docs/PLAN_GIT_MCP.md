@@ -150,7 +150,7 @@ New token `GIT_API_TOKEN` follows the existing per-service pattern:
 
 ### Task 4: Convert git_mcp.py to HTTPS REST client
 
-**Files:** `agent/claude/git_mcp.py`
+**Files:** `agent/mcp/git_mcp.py`
 
 **Action:**
 - Replace all `subprocess.run(["git", ...])` calls with `requests.get/post()` to `git-server:8443`
@@ -166,7 +166,7 @@ New token `GIT_API_TOKEN` follows the existing per-service pattern:
 
 ### Task 5: Update git_mcp_test.py for REST client
 
-**Files:** `agent/claude/git_mcp_test.py`
+**Files:** `agent/mcp/git_mcp_test.py`
 
 **Action:**
 - Replace all tests that mock git subprocess calls with tests that mock HTTP requests to git-server
