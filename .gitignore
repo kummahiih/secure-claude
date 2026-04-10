@@ -14,6 +14,8 @@ __pycache__/
 .pytest_cache/
 cluster/agent/claude/__pycache__/
 cluster/agent/claude/.pytest_cache/
+cluster/agent/isolation/__pycache__/
+cluster/agent/isolation/.pytest_cache/
 
 #aider AI chat histories
 .aider.*
