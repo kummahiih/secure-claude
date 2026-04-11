@@ -1,8 +1,8 @@
 # Token Consumption Model
 
-**Date:** 2026-04-06
+**Date:** 2026-04-11
 **Scope:** secure-claude v1.x — autonomous AI coding agent cluster
-**Data source:** Sessions 34f0c87e, b831ec05, 9e491450, e695b5d7, 3b4db094, 6928ca0b, d5a0bb42, bbc8ddf9, 55f52fa6, 767ba6a0 (2026-04-06); plus 25 prior sessions from 2026-04-03–05 analyses.
+**Data source:** Sessions 4b5af5a1, 9fcb0a3e, 1ab3c0cd, f1a5d59a, b9d7c64e, 92bcb6f3, 636605bb, bd481448, 5c249f89, d7fd07b4 (2026-04-10–11); plus 35 prior sessions from 2026-04-03–06 analyses.
 
 ---
 
@@ -18,7 +18,7 @@ Architecture docs split into overview (~3k tok) + detail (~7k tok). Detail doc g
 
 ### 1.3 Session Isolation ✅ COMPLIANT
 
-Subagent-per-task (`claude --print` per task) confirmed across all 35 sessions analyzed. No cross-task context accumulation.
+Subagent-per-task (`claude --print` per task) confirmed across all 45 sessions analyzed. No cross-task context accumulation.
 
 ### 1.4 Tool Description Bloat ✅ RESOLVED
 
@@ -26,46 +26,58 @@ Shortened in commit f205653. ~500 tokens of redundancy removed.
 
 ### 1.5 File Read Discipline ⚠️ PARTIAL
 
-`tool_counts` remains `{}` in all 10 new sessions — MCP backend tool counting not yet wired into summary aggregation. Individual `file_read` events are emitted but not rolled up. No duplicate file reads detected in session 34f0c87e (dedup endpoint works).
+`tool_counts` remains `{}` in all 10 new sessions — MCP backend tool counting not yet wired into summary aggregation. No duplicate file reads detected in sessions 4b5af5a1 or f1a5d59a (dedup endpoint works).
 
-**Context debt:** Unquantifiable until tool_counts aggregation is implemented. Estimated engineering effort: Low (aggregate existing events in `get_session_summary`).
+**Context debt:** Unquantifiable until tool_counts aggregation is implemented. Estimated engineering effort: Low.
+
+### 1.6 Model Misallocation 🔴 CRITICAL REGRESSION
+
+**All 10 sessions from 2026-04-10–11 used `claude-opus-4-6`.** Token breakdown confirms Opus on every turn across sessions 4b5af5a1, f1a5d59a, b9d7c64e, and 9fcb0a3e. This is a complete regression from the 0% Opus achieved on 2026-04-06.
+
+**Root cause:** The model parameter passed to `/ask` is not enforced server-side. The behavioral fix (callers using Sonnet) reverted — likely the caller script or user changed the model parameter back to Opus.
+
+**Cost impact:** Opus cache read pricing is $1.50/MTok vs Sonnet's $0.30/MTok (5× multiplier). Opus output is $75/MTok vs $15/MTok (5× multiplier). Per-session cost increased from **$0.17 → $1.69** — a **10× regression**.
+
+### 1.7 Turn Count Regression 🔴 HIGH
+
+Average LLM calls rose from 21.3 (2026-04-06) to **32.6** (2026-04-10–11). Session 4b5af5a1 hit **61 LLM calls**, exceeding the `--max-turns 16` cap (which allows 32 LLM calls). This suggests the turn cap was raised or removed for some sessions.
 
 ---
 
 ## 2. Token Flow Map
 
-### 2.1 Per-Session Token Profile (2026-04-06, 10 sessions)
+### 2.1 Per-Session Token Profile (2026-04-10–11, 10 sessions, ALL Opus)
 
 | Session | LLM Calls | Cache Read | Output | Duration |
 |---------|-----------|------------|--------|----------|
-| 34f0c87e | 32 | 976,060 | 635 | 70s |
-| 55f52fa6 | 27 | 676,628 | 806 | 41s |
-| e695b5d7 | 21 | 625,841 | 704 | 160s |
-| bbc8ddf9 | 23 | 583,978 | 614 | 53s |
-| d5a0bb42 | 23 | 562,594 | 790 | 48s |
-| 6928ca0b | 22 | 557,365 | 652 | 58s |
-| 767ba6a0 | 21 | 552,956 | 716 | 71s |
-| 9e491450 | 19 | 455,007 | 863 | 44s |
-| b831ec05 | 15 | 350,828 | 233 | 26s |
-| 3b4db094 | 10 | 168,590 | 190 | 73s |
-| **Average** | **21.3** | **550,985** | **620** | **64s** |
-| **Median** | **21.5** | **560,180** | **683** | **56s** |
+| f1a5d59a | 41 | 2,208,569 | 1,344 | 258s |
+| 4b5af5a1 | 61 | 1,801,513 | 811 | 156s |
+| b9d7c64e | 43 | 1,776,183 | 500 | 137s |
+| 1ab3c0cd | 36 | 981,210 | 610 | 394s |
+| 9fcb0a3e | 27 | 866,715 | 525 | 204s |
+| 5c249f89 | 26 | 735,861 | 764 | 57s |
+| 636605bb | 26 | 723,705 | 775 | 68s |
+| d7fd07b4 | 24 | 703,346 | 636 | 50s |
+| bd481448 | 24 | 694,868 | 692 | 66s |
+| 92bcb6f3 | 18 | 445,926 | 373 | 37s |
+| **Average** | **32.6** | **1,093,790** | **703** | **143s** |
+| **Median** | **26.5** | **750,783** | **663** | **103s** |
 
-### 2.2 Context Growth Curve (Session 34f0c87e, 32 turns)
+### 2.2 Context Growth Curve (Session 4b5af5a1, 61 turns, Opus)
 
 ```
-Turn  1-3:  ~22,000 tok (system prompt + tool schemas — cache creation)
-Turn  4-5:  ~22,400 tok (plan + initial tool results)
-Turn  6-8:  ~31,300 tok (doc reads: CONTEXT.md, ARCHITECTURE_OVERVIEW.md)
-Turn  9-10: ~31,900 tok (file reads)
-Turn 11-13: ~34,550 tok (edits + test results)
-Turn 14-16: ~35,800 tok (git operations)
-Turn 17-21: ~37,000 tok (second file cycle)
-Turn 22-25: ~39,000 tok (commit + plan_complete)
-Turn 26-32: ~39,500 tok (final operations + DONE)
+Turn  1-3:   ~22,400 tok (system prompt + tool schemas — cache creation)
+Turn  4-6:   ~27,900 tok (plan + initial reads)
+Turn  7-10:  ~37,200 tok (doc reads)
+Turn 11-16:  ~41,700 tok (file edits + test cycle)
+Turn 17-21:  ~42,000 tok (git operations)
+Turn 22-30:  ~19,700 tok (context reset — new subprocess?)
+Turn 31-45:  ~44,500 tok (second edit cycle)
+Turn 46-54:  ~46,300 tok (continued edits)
+Turn 55-61:  ~71,500 tok (large file reads near end)
 ```
 
-Context grew from 22k → 39.5k over 32 turns (80% growth). The `--max-turns 16` flag caps at 32 LLM calls (each "turn" = 2 LLM calls: tool call + result processing). Growth is well-bounded.
+Context peaked at 71.5k tokens — significantly higher than the 39.5k peak observed on 2026-04-06. The 61-turn session exceeds the expected --max-turns 16 cap.
 
 ### 2.3 Component → Token Cost Map
 
@@ -83,28 +95,40 @@ Context grew from 22k → 39.5k over 32 turns (80% growth). The `--max-turns 16`
 
 ## 3. Session Analysis
 
-### 3.1 Aggregate Statistics (2026-04-06)
+### 3.1 Aggregate Statistics (2026-04-10–11)
 
-| Metric | Value |
-|--------|-------|
-| Sessions analyzed | 10 |
-| Model used | claude-sonnet-4-6 (100%) |
-| Avg LLM calls/session | 21.3 |
-| Avg cache read/session | 550,985 tok |
-| Avg output/session | 620 tok |
-| Avg duration/session | 64s |
-| Max cache read | 976,060 tok (34f0c87e, 32 turns) |
-| Min cache read | 168,590 tok (3b4db094, 10 turns) |
-| Runaway sessions (>1M cache) | 0/10 (0%) — down from 3/10 on 2026-04-05 |
+| Metric | Value | Change from 2026-04-06 |
+|--------|-------|------------------------|
+| Sessions analyzed | 10 | — |
+| Model used | claude-opus-4-6 (100%) | 🔴 was 0% Opus |
+| Avg LLM calls/session | 32.6 | 🔴 +53% (was 21.3) |
+| Avg cache read/session | 1,093,790 tok | 🔴 +99% (was 550,985) |
+| Avg output/session | 703 tok | ~same (was 620) |
+| Avg duration/session | 143s | +123% (was 64s) |
+| Max cache read | 2,208,569 tok (f1a5d59a) | 🔴 +126% (was 976k) |
+| Sessions >1M cache | 3/10 (30%) | 🔴 was 0/10 |
 
-### 3.2 Cost Estimate (Sonnet pricing: $0.30/MTok cache read, $3/MTok input, $15/MTok output)
+### 3.2 Cost Estimate (Opus pricing: $1.50/MTok cache read, $15/MTok input, $75/MTok output)
 
-| Metric | Per Session | Per 10 Sessions |
-|--------|-------------|-----------------|
-| Cache read cost | $0.165 | $1.65 |
-| Input cost | $0.00006 | $0.0006 |
-| Output cost | $0.009 | $0.09 |
-| **Total** | **$0.174** | **$1.74** |
+| Metric | Per Session (Opus, actual) | Per Session (Sonnet, if fixed) |
+|--------|---------------------------|-------------------------------|
+| Cache read cost | $1.64 | $0.33 |
+| Input cost | $0.0001 | $0.00002 |
+| Output cost | $0.053 | $0.011 |
+| **Total** | **$1.69** | **$0.34** |
+
+**Switching back to Sonnet alone would save $1.35/session (80%).** Reducing turn count back to ~21 would save an additional $0.17/session.
+
+### 3.3 Comparison Table
+
+| Date | Avg Cache/Session | Avg Calls | Runaways (>1M) | Model | Avg Cost/Session |
+|------|-------------------|-----------|-----------------|-------|------------------|
+| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | 60% Opus | ~$1.50 |
+| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | 10% Opus | ~$0.50 |
+| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | 0% Opus | **$0.17** |
+| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **100% Opus** | **$1.69** |
+
+The 89% cost reduction achieved by 2026-04-06 has been **fully reversed**. Current per-session cost is higher than the 2026-04-03 baseline.
 
 _Historical session tables: [TOKEN_USE_ARCHIVE.md](TOKEN_USE_ARCHIVE.md)_
 
@@ -112,35 +136,53 @@ _Historical session tables: [TOKEN_USE_ARCHIVE.md](TOKEN_USE_ARCHIVE.md)_
 
 ## 4. Waste Taxonomy
 
-### 4.1 Model Misallocation — ✅ RESOLVED
+### 4.1 Model Misallocation — 🔴 CRITICAL REGRESSION
 
-All 10 sessions on 2026-04-06 used Sonnet. Opus usage dropped from 60% → 10% → 0%.
-
-### 4.2 Heavy Session Runaway — ✅ RESOLVED
-
-`--max-turns 16` enforced since 2026-04-05. Heaviest session (34f0c87e) hit 32 LLM calls / 976k cache — well within budget. No sessions exceeded 1M cache tokens. Previous worst case was 7.1M.
-
-### 4.3 Test Output Bloat — ✅ RESOLVED
-
-Pass returns `{"status":"pass","exit_code":0}`; fail returns last 50 lines.
-
-### 4.4 Polling Waste — ✅ RESOLVED
-
-Blocking `wait=true` on `get_test_results`. Zero poll round-trips observed.
-
-### 4.5 Tool Count Aggregation Gap — ⚠️ LOW PRIORITY
-
-`tool_counts` is `{}` in all sessions. Individual events (`file_read`, `test_run`, `git_op`) are emitted but `get_session_summary` doesn't aggregate them. This prevents quantifying per-tool waste.
+All 10 sessions used Opus. This is the **single largest cost driver**, adding $1.35/session compared to Sonnet.
 
 | Metric | Value |
 |--------|-------|
-| Impact | Observability gap only; no direct token waste |
-| **Fix** | Aggregate `file_read`/`test_run`/`git_op` events in `get_session_summary` |
+| Waste per session | $1.35 (Opus vs Sonnet at same token volume) |
+| Waste per 10 sessions | $13.50 |
+| **Root cause** | No server-side model enforcement; caller reverted to Opus |
+| **Fix** | Enforce Sonnet default in `server.py`; require explicit Opus opt-in flag |
 | **Effort** | Low |
 
-### 4.6 DONE-Call Overhead — ✅ RESOLVED (monitoring)
+### 4.2 Turn Count Inflation — 🟡 HIGH
 
-Pre-spawn plan check deployed. Smallest session (3b4db094, 10 calls, 168k cache) may be a DONE-call or simple task — cost is negligible at $0.05.
+Average 32.6 calls vs 21.3 on 2026-04-06 (+53%). Session 4b5af5a1 hit 61 calls (exceeds --max-turns 16 = 32 calls cap).
+
+| Metric | Value |
+|--------|-------|
+| Extra cache per session | ~543k tok (1,094k − 551k) |
+| Extra cost at Opus | $0.81/session |
+| Extra cost at Sonnet | $0.16/session |
+| **Root cause** | --max-turns may have been raised/removed; complex tasks generating more turns |
+| **Fix** | Verify --max-turns 16 enforcement; audit sessions with >32 calls |
+| **Effort** | Low |
+
+### 4.3 Heavy Session Runaway — 🟡 REGRESSED
+
+3/10 sessions exceeded 1M cache tokens (was 0/10 on 2026-04-06). Session f1a5d59a hit 2.2M.
+
+| Metric | Value |
+|--------|-------|
+| Waste per runaway | ~$1.50 extra (Opus) vs $0.30 (Sonnet) |
+| **Root cause** | Combination of Opus model + high turn counts + large file reads |
+| **Fix** | Re-enforce --max-turns 16; model switch to Sonnet caps effective cost |
+| **Effort** | Low |
+
+### 4.4 Test Output Bloat — ✅ RESOLVED
+
+Pass returns `{"status":"pass","exit_code":0}`; fail returns last 50 lines.
+
+### 4.5 Polling Waste — ✅ RESOLVED
+
+Blocking `wait=true` on `get_test_results`. Zero poll round-trips observed.
+
+### 4.6 Tool Count Aggregation Gap — ⚠️ LOW PRIORITY
+
+`tool_counts` is `{}` in all sessions. Individual events emitted but not aggregated.
 
 ### 4.7 Context Accumulation — ✅ RESOLVED
 
@@ -154,42 +196,58 @@ TOKEN_USE.md excluded from routine reads. Historical data archived.
 
 ## 5. Optimization Plan
 
-### 5.1 Aggregate tool_counts in get_session_summary [P2 — Low Effort]
+### 5.1 Enforce Sonnet Default in server.py [P0 — Low Effort, CRITICAL]
 
-Roll up `file_read`, `test_run`, `git_op` event counts into the existing `tool_counts` field in `get_session_summary`. Enables per-tool waste measurement.
+The behavioral fix (callers choosing Sonnet) has failed. **Server-side enforcement is required.**
 
-**Files:** `cluster/log-server/main.go` (or equivalent query logic)
-**Impact:** Unlocks data-driven tool optimization. No direct token savings.
-
-### 5.2 Default All /ask to Sonnet [P2 — Low Effort]
-
-Model misallocation is resolved in practice (0% Opus on 2026-04-06) but not enforced. Hardcode Sonnet default in `server.py` for `/ask`; require explicit opt-in for Opus.
+**Change:** In `cluster/agent/claude/server.py`, default the model to `claude-sonnet-4-6` for `/ask` endpoint. Add an explicit `force_opus=true` parameter that must be set to use Opus. Log a warning when Opus is requested.
 
 **Files:** `cluster/agent/claude/server.py`
-**Impact:** Prevents regression. 80% cost reduction if Opus creeps back.
+**Impact:** $1.35/session savings (80% reduction). Prevents future regressions.
 
-### 5.3 Reduce Turn Count for Simple Tasks [P3 — Medium Effort]
+### 5.2 Verify --max-turns 16 Enforcement [P0 — Low Effort]
 
-Average 21 LLM calls/session is reasonable for complex tasks but high for simple edits. Consider a "fast path" system prompt variant that skips doc reads for tasks marked as trivial.
+Session 4b5af5a1 hit 61 LLM calls, which exceeds the 32-call limit from `--max-turns 16`. Verify the flag is present in all `claude --print` invocations.
+
+**Files:** `cluster/agent/claude/server.py` (subprocess invocation)
+**Impact:** Caps worst-case sessions at 32 calls (~1M cache at Sonnet = $0.30).
+
+### 5.3 Aggregate tool_counts in get_session_summary [P2 — Low Effort]
+
+Roll up `file_read`, `test_run`, `git_op` event counts into `tool_counts` field.
+
+**Files:** `cluster/log-server/main.go`
+**Impact:** Enables per-tool waste measurement. No direct token savings.
+
+### 5.4 Fast-path Prompt for Trivial Tasks [P3 — Medium Effort]
+
+Average 32.6 calls/session is high even for complex tasks. A lightweight system prompt variant that skips doc reads for tasks marked trivial could halve call counts for simple edits.
 
 **Files:** `cluster/agent/prompts/system/ask-adhoc.md`, `cluster/agent/claude/server.py`
-**Impact:** Could reduce simple-task sessions from 21 → 10 calls (~50% cache savings on those tasks).
+**Impact:** Could reduce simple-task sessions from 30+ → 10–15 calls (~50% cache savings).
 
 ---
 
 ## 6. Infrastructure Requirements
 
-### 6.1 Log Aggregation Enhancement
+### 6.1 Model Enforcement (CRITICAL)
 
 | Change | File | Description |
 |--------|------|-------------|
-| Aggregate tool events into `tool_counts` | log-server query logic | Count `file_read`/`test_run`/`git_op` per session |
+| Default model to Sonnet | `cluster/agent/claude/server.py` | Hardcode `claude-sonnet-4-6` for `/ask`; require explicit opt-in for Opus |
+| Log model usage | `cluster/agent/claude/server.py` | Emit WARNING when Opus is used for `/ask` |
 
-### 6.2 Model Enforcement (Optional)
+### 6.2 Turn Cap Verification
 
 | Change | File | Description |
 |--------|------|-------------|
-| Default model config | `cluster/agent/claude/server.py` | Hardcode Sonnet for `/ask`; Opus for `/plan` only |
+| Verify `--max-turns 16` | `cluster/agent/claude/server.py` | Audit subprocess command construction; ensure flag is always present |
+
+### 6.3 Log Aggregation Enhancement
+
+| Change | File | Description |
+|--------|------|-------------|
+| Aggregate tool events | log-server query logic | Count `file_read`/`test_run`/`git_op` per session in `tool_counts` |
 
 ---
 
@@ -197,15 +255,16 @@ Average 21 LLM calls/session is reasonable for complex tasks but high for simple
 
 | Priority | Item | Category | Current Waste | Expected Savings | Effort | Status |
 |----------|------|----------|---------------|------------------|--------|--------|
-| P0 | Add `--max-turns 16` to `claude --print` | Runaway Prevention | Up to 7.1M cache/session | Caps at ~1M cache | Low | **Done** |
-| P0 | Default `/ask` to Sonnet | Model Allocation | 5× cost on Opus sessions | 80% on affected | Low | **Done** (behavioral) |
+| P0 | Enforce Sonnet default in server.py | Model Allocation | $1.35/session (5× markup) | 80% cost reduction | Low | **Open** |
+| P0 | Verify --max-turns 16 enforcement | Runaway Prevention | 61 calls observed (cap=32) | Caps at 32 calls | Low | **Open** |
+| P0 | Add `--max-turns 16` to `claude --print` | Runaway Prevention | Up to 7.1M cache/session | Caps at ~1M cache | Low | **Done** (verify) |
+| P0 | Default `/ask` to Sonnet | Model Allocation | 5× cost on Opus sessions | 80% on affected | Low | **Done** (behavioral, regressed) |
 | P1 | Truncate test output (pass: minimal JSON; fail: 50 lines) | Infrastructure | 2k–15k tok/task | 2k–15k tok/task | Low | **Done** |
 | P1 | Instrument MCP backends (file_read, test_run, git_op events) | Observability | Unquantifiable waste | Full visibility | Medium | **Done** |
 | P2 | Blocking `wait=true` on get_test_results | Infrastructure | 1–2 poll round-trips | 30k–78k cache/poll | Medium | **Done** |
 | P2 | Split ARCHITECTURE.md → overview + detail | Documentation | 7k–9k tok/routine task | 7k–9k tok/task | Low | **Done** |
 | P2 | Archive TOKEN_USE history; exclude from routine reads | Context Hygiene | 11k tok on non-analysis | 11k tok/read | Low | **Done** |
 | P2 | Aggregate tool_counts in get_session_summary | Observability | Visibility gap | Enables per-tool analysis | Low | Open |
-| P2 | Enforce Sonnet default in server.py code | Model Allocation | Regression risk | Prevents Opus creep | Low | Open |
 | P3 | Pre-spawn plan check (skip if no pending task) | Infrastructure | 22k tok/DONE-call | 22k tok/no-op | Low | **Done** |
 | P3 | Per-turn LLM event logging | Observability | Turn-level blind spot | Full turn visibility | Medium | **Done** |
 | P3 | Fast-path prompt for trivial tasks | Turn Reduction | ~10 extra turns on simple tasks | ~50% cache on simple tasks | Medium | Open |
@@ -218,13 +277,15 @@ Average 21 LLM calls/session is reasonable for complex tasks but high for simple
 |--------|---------|
 | **Open** | Not started |
 | **Done** | Implemented and verified |
+| **Done** (verify) | Previously implemented; needs re-verification due to regression |
 
 ### Cost Trend
 
-| Date | Avg Cache/Session | Avg Calls/Session | Runaways | Model Mix |
-|------|-------------------|-------------------|----------|-----------|
-| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | 60% Opus |
-| 2026-04-05 | ~550k (excl. runaways: 235k) | ~21 | 3/10 (30%) | 10% Opus |
-| 2026-04-06 | **551k** | **21.3** | **0/10 (0%)** | **0% Opus** |
+| Date | Avg Cache/Session | Avg Calls/Session | Runaways (>1M) | Model Mix | Avg Cost/Session |
+|------|-------------------|-------------------|-----------------|-----------|------------------|
+| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | 60% Opus | ~$1.50 |
+| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | 10% Opus | ~$0.50 |
+| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | 0% Opus | **$0.17** |
+| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **100% Opus** | **$1.69** 🔴 |
 
-Runaway elimination and Opus removal reduced effective per-session cost from ~$1.50 (2026-04-03 avg with Opus) to **$0.17** (2026-04-06) — an **89% reduction**.
+**Summary:** The 89% cost reduction achieved by 2026-04-06 ($1.50 → $0.17) has been fully reversed. Current cost ($1.69/session) exceeds the original 2026-04-03 baseline. Root cause: 100% Opus model usage + turn count inflation. Both are fixable with low-effort server-side enforcement.
