@@ -16,6 +16,7 @@ ext_net (external — host port binding + Anthropic egress)
 int_net (internal, Docker bridge, internal: true — no external routing)
   ├─ caddy-sidecar         (also on ext_net)
   ├─ claude-server:8000
+  ├─ codex-server:8000
   ├─ proxy:4000
   ├─ mcp-server:8443
   ├─ git-server:8443
@@ -43,6 +44,12 @@ claude-server ──TLS (internal CA)──→ plan-server:8443      (Bearer PLA
 claude-server ──TLS (internal CA)──→ tester-server:8443    (Bearer TESTER_API_TOKEN)
 claude-server ──TLS (internal CA)──→ log-server:8443       (Bearer LOG_API_TOKEN)
 claude-server ──DYNAMIC_AGENT_KEY──→ proxy:4000            (LiteLLM master_key)
+codex-server  ──TLS (internal CA)──→ mcp-server:8443      (Bearer MCP_API_TOKEN)
+codex-server  ──TLS (internal CA)──→ git-server:8443       (Bearer GIT_API_TOKEN)
+codex-server  ──TLS (internal CA)──→ plan-server:8443      (Bearer PLAN_API_TOKEN)
+codex-server  ──TLS (internal CA)──→ tester-server:8443    (Bearer TESTER_API_TOKEN)
+codex-server  ──TLS (internal CA)──→ log-server:8443       (Bearer LOG_API_TOKEN)
+codex-server  ──DYNAMIC_AGENT_KEY──→ proxy:4000            (LiteLLM master_key)
 proxy         ──TLS (internal CA)──→ caddy-sidecar:8081    (ANTHROPIC_API_KEY passthrough)
 caddy-sidecar ──TLS (public CA)───→ api.anthropic.com:443
 ```
@@ -61,26 +68,28 @@ The agent uses `DYNAMIC_AGENT_KEY` (short-lived, per-session); the real `ANTHROP
 
 ### Token Isolation Matrix
 
-| Token | claude-server | proxy | mcp-server | plan-server | tester-server | git-server | log-server | caddy |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-| ANTHROPIC_API_KEY | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | — |
-| MCP_API_TOKEN | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| PLAN_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| TESTER_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
-| GIT_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
-| LOG_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
+| Token | claude-server | codex-server | proxy | mcp-server | plan-server | tester-server | git-server | log-server | caddy |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| ANTHROPIC_API_KEY | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| DYNAMIC_AGENT_KEY | ✓ required | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| CLAUDE_API_TOKEN | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | — |
+| CODEX_API_TOKEN | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | — |
+| MCP_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| PLAN_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| TESTER_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden |
+| GIT_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden | ✗ forbidden |
+| LOG_API_TOKEN | ✓ required | ✓ required | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✗ forbidden | ✓ required | ✗ forbidden |
 
 Each token is forbidden in all other services' environments, enforced by startup isolation checks (`verify_isolation.py`, `proxy_wrapper.py`, `entrypoint.sh` scripts). All token comparisons use `secrets.compare_digest` (Python) or `subtle.ConstantTimeCompare` (Go).
 
 ### Startup Isolation Checks
 
-Every container validates security invariants before serving:
+Every container validates security invariants before serving. The shared `isolation/verify_isolation.py` module provides a unified check framework used by both `claude-server` and `codex-server`.
 
 | Container | Check Script | Key Checks |
 |:---|:---|:---|
-| claude-server | `verify_isolation.py` | 26 checks: forbidden/required env vars for all 8 roles, token presence/absence |
+| claude-server | `verify_isolation.py` | 26 checks: forbidden/required env vars for all roles, token presence/absence |
+| codex-server | `verify_isolation.py` | Same isolation framework, configured for codex role |
 | proxy | `proxy_wrapper.py` | 4 checks: `ANTHROPIC_API_KEY` present, `DYNAMIC_AGENT_KEY` present, forbidden tokens absent |
 | mcp-server | `entrypoint.sh` | Env scan + `.env` file scan for forbidden tokens |
 | git-server | `entrypoint.sh` | Env scan + token scan |
@@ -102,6 +111,7 @@ Every container validates security invariants before serving:
 |:---|:---|:---|:---|:---|:---|:---|
 | caddy-sidecar | ALL | — | — | 100 | true | caddyuser |
 | claude-server | ALL | 4g | 2.0 | 200 | — | 1000 |
+| codex-server | ALL | 4g | 2.0 | 200 | — | 1000 |
 | proxy | ALL | — | — | 150 | true | 1000 |
 | mcp-server | ALL | 512m | 1.0 | 100 | — | 1000 |
 | git-server | ALL | — | — | — | — | 1000 |
@@ -114,7 +124,7 @@ Every container validates security invariants before serving:
 ### Additional Security Layers
 
 1. **MCP security proxy (mcp-watchdog):** Intercepts all JSON-RPC between Claude Code and MCP wrappers, blocking 40+ attack classes before they reach backend servers.
-2. **Prompt immutability:** `/app/prompts/` and `~/.claude/commands/` owned by `root:root`, mode `444`/`555`. Agent (UID 1000) cannot modify them.
+2. **Prompt immutability:** `/app/prompts/` and `~/.claude/commands/` (or `~/.codex/commands/`) owned by `root:root`, mode `444`/`555`. Agent (UID 1000) cannot modify them.
 3. **MCP config as build artifact:** `.mcp.json` baked into image; not runtime-configurable.
 4. **Log sanitization:** `_redact_secrets()` replaces all known token values with `[REDACTED]`; subprocess stdout/stderr at DEBUG level only.
 5. **Model allowlist:** `ALLOWED_MODELS` frozenset validates `request.model` before subprocess invocation.
@@ -131,6 +141,7 @@ Every container validates security invariants before serving:
 | Decision | Chosen | Rejected | Rationale |
 |:---|:---|:---|:---|
 | Agent framework | Claude Code CLI subprocess | LangChain | Simpler, no orchestration overhead |
+| Parallel agent | OpenAI Codex CLI (codex-server) | Single agent only | Enables multi-model development; shares MCP infrastructure |
 | MCP transport | stdio wrappers → HTTPS REST | HTTP direct to servers | Servers are REST not MCP protocol |
 | Git isolation | Submodule repo as workspace | Path filtering | Path filtering vulnerable to traversal |
 | Dockerfile location | Parent repo | Inside submodule | Dockerfiles need `certs/`; keeps agent from modifying its container |
@@ -145,6 +156,7 @@ Every container validates security invariants before serving:
 | Submodule git routing | `parse_gitmodules` + `git_env_for` | Separate tool per submodule | Single tool surface; auto-detection from file paths |
 | Proxy network access | `int_net` only, egress via caddy-sidecar | Direct internet from proxy | Prevents API key exfiltration; all outbound funnelled through caddy-sidecar |
 | Architecture doc format | Split overview + detail | Single combined file | Token efficiency: routine tasks need only overview (~3k tok vs ~10k tok combined) |
+| Isolation checks | Shared `isolation/verify_isolation.py` | Per-server duplicated checks | Single source of truth; reused by both claude-server and codex-server |
 
 ### Open Residual Risks
 

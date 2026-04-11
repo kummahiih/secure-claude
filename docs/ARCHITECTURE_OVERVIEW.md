@@ -2,7 +2,7 @@
 
 ## Overview
 
-**secure-claude** is a hardened, containerized environment for running Claude Code as an autonomous AI coding agent. The system enables a *plan-then-execute* agentic loop where Claude Code can read, modify, test, and commit source code without holding real API credentials or having direct internet access. Security is enforced structurally — through container isolation, network segmentation, per-service token scoping, and filesystem jails — rather than by filtering.
+**secure-claude** is a hardened, containerized environment for running Claude Code as an autonomous AI coding agent. The system enables a *plan-then-execute* agentic loop where Claude Code can read, modify, test, and commit source code without holding real API credentials or having direct internet access. A parallel codex-server provides the same workflow using OpenAI Codex. Security is enforced structurally — through container isolation, network segmentation, per-service token scoping, and filesystem jails — rather than by filtering.
 
 ---
 
@@ -14,11 +14,11 @@ Nine containers run on an internal Docker network (`int_net`):
 |:---|:---|:---|:---|
 | **caddy-sidecar** | TLS termination, external ingress, egress proxy | Caddy 2 Alpine | `:8443` (ingress), `:8081` (egress → `api.anthropic.com` only) |
 | **claude-server** | Main app server; spawns Claude Code CLI + 6 MCP stdio servers | Python/FastAPI, Claude Code CLI `@2.1.74` | `:8000` |
-| **codex-server** | Parallel agent; spawns OpenAI Codex CLI + MCP stdio servers | Python/FastAPI, OpenAI Codex | `:8000` |
-| **proxy** | LLM API gateway; holds real `ANTHROPIC_API_KEY` | LiteLLM (pinned Docker image) | `:4000` |
+| **codex-server** | Parallel agent; spawns OpenAI Codex CLI + MCP stdio servers | Python/FastAPI, OpenAI Codex `@0.118.0` | `:8000` |
+| **proxy** | LLM API gateway; holds real `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` | LiteLLM (pinned Docker image) | `:4000` |
 | **mcp-server** | Filesystem operations; `os.OpenRoot` jail at `/workspace` | Go REST | `:8443` |
 | **git-server** | Git operations (status/diff/add/commit/log/reset) | Go REST | `:8443` |
-| **plan-server** | Plan lifecycle management (create/read/update/block/complete) | Python/FastAPI | `:8443` |
+| **plan-server** | Plan lifecycle management (create/read/update/block/unblock/complete) | Python/FastAPI | `:8443` |
 | **tester-server** | Test execution; runs `/workspace/test.sh` as subprocess | Go REST | `:8443` |
 | **log-server** | Structured session log storage and queries | Go REST | `:8443` |
 
@@ -57,7 +57,8 @@ External user
 3. Claude reads files (fileserver), edits code (fileserver)
 4. Claude runs tests (tester-server); on failure: fix and retry (max 3 attempts)
 5. On pass: Claude calls `git_add` + `git_commit` (git-server), then `plan_complete`
-6. Repeat from step 2 until no active task → output `DONE`
+6. If a task is blocked: Claude calls `plan_block` with reason and context; user can later call `plan_unblock` to resume
+7. Repeat from step 2 until no active task → output `DONE`
 
 ### Credential Flow
 
@@ -81,8 +82,9 @@ The agent **never** holds `ANTHROPIC_API_KEY`.
 | Category | Technology |
 |:---|:---|
 | Agent runtime | Claude Code CLI (pinned `@2.1.74`, `--print` mode) |
+| Codex runtime | OpenAI Codex CLI (pinned `@0.118.0`) |
 | LLM gateway | LiteLLM (`ghcr.io/berriai/litellm:main-v1.82.3-stable.patch.2`) |
-| API servers | Python / FastAPI (`claude-server`, `plan-server`) |
+| API servers | Python / FastAPI (`claude-server`, `codex-server`, `plan-server`) |
 | File/Git/Test/Log servers | Go (`mcp-server`, `git-server`, `tester-server`, `log-server`) |
 | Reverse proxy / TLS | Caddy 2 (internal CA, TLS 1.3 minimum) |
 | MCP transport | stdio wrappers → HTTPS REST; `mcp-watchdog` intercepts all JSON-RPC |
@@ -95,20 +97,20 @@ The agent **never** holds `ANTHROPIC_API_KEY`.
 
 ## MCP Tool Architecture
 
-Six MCP stdio servers run inside `claude-server`. Each wraps a backend REST service (or local filesystem) and is intercepted by `mcp-watchdog` which blocks 40+ attack classes on all JSON-RPC traffic.
+Six MCP stdio servers run inside `claude-server` (and equivalently inside `codex-server`). Each wraps a backend REST service (or local filesystem) and is intercepted by `mcp-watchdog` which blocks 40+ attack classes on all JSON-RPC traffic.
 
 | MCP Server | Backend | Transport | Tools |
 |:---|:---|:---|:---|
-| `files_mcp.py` | mcp-server:8443 | stdio → HTTPS REST | `read_workspace_file`, `list_files`, `create_file`, `write_file`, `delete_file`, `grep_files`, `replace_in_file`, `append_file`, `create_directory` |
+| `files_mcp.py` | mcp-server:8443 | stdio → HTTPS REST | `read_workspace_file`, `list_files`, `create_file`, `write_file`, `delete_file`, `grep_files`, `replace_in_file`, `append_file`, `create_directory`, `copy_file`, `diff_files` |
 | `git_mcp.py` | git-server:8443 | stdio → HTTPS REST | `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`, `git_reset_soft` |
 | `docs_mcp.py` | `/docs` (local ro mount) | stdio → local fs | `list_docs`, `read_doc` |
-| `plan_mcp.py` | plan-server:8443 | stdio → HTTPS REST | `plan_current`, `plan_list`, `plan_complete`, `plan_block`, `plan_create`, `plan_update_task` |
+| `plan_mcp.py` | plan-server:8443 | stdio → HTTPS REST | `plan_current`, `plan_list`, `plan_complete`, `plan_block`, `plan_unblock`, `plan_create`, `plan_update_task` |
 | `tester_mcp.py` | tester-server:8443 | stdio → HTTPS REST | `run_tests`, `get_test_results` |
-| `log_mcp.py` | log-server:8443 | stdio → HTTPS REST | `list_sessions`, `get_session_summary`, `query_logs`, `get_token_breakdown` |
+| `log_mcp.py` | log-server:8443 | stdio → HTTPS REST | `list_sessions`, `get_session_summary`, `query_logs`, `get_token_breakdown`, `get_file_dedup_report` |
 
 ### MCP Config Delivery
 
-`.mcp.json` is baked into the `claude-server` Docker image at build time. The agent cannot modify which tools it has access to at runtime. Claude Code is invoked with `--mcp-config .mcp.json`.
+`.mcp.json` is baked into the `claude-server` and `codex-server` Docker images at build time. The agent cannot modify which tools it has access to at runtime. Claude Code is invoked with `--mcp-config .mcp.json`.
 
 ### Submodule Support
 
@@ -158,7 +160,9 @@ secure-claude/
 ├── cluster/
 │   ├── agent/              # MCP wrappers + system prompts (submodule)
 │   │   ├── claude/         # FastAPI server + isolation checks
-│   │   ├── mcp/            # MCP stdio wrappers
+│   │   ├── codex/          # Codex FastAPI server + isolation checks
+│   │   ├── isolation/      # Shared verify_isolation.py
+│   │   ├── mcp/            # MCP stdio wrappers (shared by claude + codex)
 │   │   └── prompts/        # system/ (ask.md, plan.md) + commands/
 │   ├── planner/            # Planner submodule
 │   ├── tester/             # Tester server submodule (Go)
