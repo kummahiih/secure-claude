@@ -95,6 +95,10 @@ chmod 750 cluster/certs cluster/workspace
 # 640: You can read/write, Group can read, Others get NOTHING.
 chmod 640 cluster/certs/*
 
+# just compile these here before making a docker for this
+(cd cluster/client/cmd/ask/ && go build)
+(cd cluster/client/cmd/plan/ && go build)
+
 
 # --- NEW: Check for setup-only flag ---
 if [[ "$1" == "--setup-only" ]]; then
