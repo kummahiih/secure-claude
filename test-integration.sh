@@ -87,7 +87,7 @@ echo "[+] Scanning Go deps (govulncheck)..."
 (
   set +e
   echo "  Scanning fileserver..."
-  GOVULN_FS=$(cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  GOVULN_FS=$(cd cluster/agent/fileserver && go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./... -show verbose 2>&1)
   if echo "$GOVULN_FS" | grep -q "No vulnerabilities found"; then
     echo "  ✅ fileserver govulncheck clean"
   else
@@ -95,7 +95,7 @@ echo "[+] Scanning Go deps (govulncheck)..."
   fi
 
   echo "  Scanning tester..."
-  GOVULN_TS=$(cd cluster/tester && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  GOVULN_TS=$(cd cluster/tester && go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./... 2>&1)
   if echo "$GOVULN_TS" | grep -q "No vulnerabilities found"; then
     echo "  ✅ tester govulncheck clean"
   else
@@ -103,7 +103,7 @@ echo "[+] Scanning Go deps (govulncheck)..."
   fi
 
   echo '  Scanning gitserver...'
-  GOVULN_GS=$(cd cluster/agent/gitserver && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  GOVULN_GS=$(cd cluster/agent/gitserver && go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./... 2>&1)
   if echo "$GOVULN_GS" | grep -q 'No vulnerabilities found'; then
     echo '  ✅ gitserver govulncheck clean'
   else
@@ -111,7 +111,7 @@ echo "[+] Scanning Go deps (govulncheck)..."
   fi
 
   echo '  Scanning log-server...'
-  GOVULN_LS=$(cd cluster/log-server && go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1)
+  GOVULN_LS=$(cd cluster/log-server && go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./... 2>&1)
   if echo "$GOVULN_LS" | grep -q 'No vulnerabilities found'; then
     echo '  ✅ log-server govulncheck clean'
   else
