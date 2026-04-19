@@ -36,20 +36,24 @@ echo "  SUB-REPOSITORY UNIT TESTS"
 echo "========================================"
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/4: Running agent tests..."
+echo "[$(date +'%H:%M:%S')] 1/5: Running agent tests..."
 (cd cluster/agent && ./test.sh)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/4: Running planner tests..."
+echo "[$(date +'%H:%M:%S')] 2/5: Running planner tests..."
 (cd cluster/planner && ./test.sh)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/4: Running tester tests..."
+echo "[$(date +'%H:%M:%S')] 3/5: Running tester tests..."
 (cd cluster/tester && ./test.sh)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/4: Running log-server tests..."
+echo "[$(date +'%H:%M:%S')] 4/5: Running log-server tests..."
 (cd cluster/log-server && bash ./test.sh)
+
+echo "----------------------------------------"
+echo "[$(date +'%H:%M:%S')] 5/5: Running client tests..."
+(cd cluster/client && bash ./test.sh)
 
 echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] ✅ All unit tests passed!"
