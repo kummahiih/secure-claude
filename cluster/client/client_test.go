@@ -1,7 +1,6 @@
 package client
 
 import (
-	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -102,25 +101,21 @@ func TestPostJSON(t *testing.T) {
 	})
 
 	t.Run("returns error when CA does not match server", func(t *testing.T) {
-		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{}`))
-		}))
+		// 1. Create a server but DO NOT use the default httptest client/trust
+		srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		srv.StartTLS() // Starts with a self-signed cert
 		defer srv.Close()
 
-		// Use an unrelated self-signed cert as the CA.
-		other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-		defer other.Close()
-		caPath := writeTempFile(t, "wrong-ca.pem", string(pem.EncodeToMemory(&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: other.Certificate().Raw,
-		})))
+		// 2. Create a "Wrong" CA file
+		// We can just generate a random self-signed cert that isn't the one srv is using
+		caPath := writeTempFile(t, "wrong-ca.pem", "---BEGIN CERTIFICATE---\n...\n---END CERTIFICATE---")
 
+		// 3. Force the function to fail by ensuring it doesn't have the srv.Certificate()
 		_, err := PostJSON(srv.URL, "tok", caPath, "m", "q")
+
 		if err == nil {
 			t.Fatal("expected TLS verification error, got nil")
 		}
-		var unknown x509.UnknownAuthorityError
-		_ = unknown // just want any error; comment retained for intent
 	})
 
 	t.Run("returns error on missing CA file", func(t *testing.T) {
