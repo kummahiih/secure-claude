@@ -168,7 +168,7 @@ access to secrets. The script runs as `appuser` (UID 1000).
 | Category | Tools / Versions |
 | :--- | :--- |
 | Base image | `python:3.12-slim` (Debian-based) |
-| Go | 1.26.1 — `go`, `gofmt` available on `PATH` |
+| Go | 1.26.2 — `go`, `gofmt` available on `PATH` |
 | Python | 3.12 — `python`, `pip` |
 | pytest | 9.0.3 (+ pytest-asyncio 1.3.0) |
 | Python libraries | fastapi, uvicorn, pydantic, requests, certifi, mcp, mcp-watchdog |

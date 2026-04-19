@@ -15,7 +15,7 @@
 # GET /health unauthenticated healthcheck.
 
 # Stage 1: Go Builder
-FROM golang:1.26.1-alpine AS builder
+FROM golang:1.26.2-alpine AS builder
 WORKDIR /app
 COPY tester/main.go tester/go.mod ./
 RUN go build -o tester-server main.go
@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG GO_VERSION=1.26.1
+ARG GO_VERSION=1.26.2
 RUN curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz" \
     | tar -C /usr/local -xz \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go \
