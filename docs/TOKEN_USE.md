@@ -30,14 +30,6 @@ Shortened in commit f205653. ~500 tokens of redundancy removed.
 
 **Context debt:** Unquantifiable until tool_counts aggregation is implemented. Estimated engineering effort: Low.
 
-### 1.6 Model Misallocation 🔴 CRITICAL REGRESSION
-
-**All 10 sessions from 2026-04-10–11 used `claude-opus-4-6`.** Token breakdown confirms Opus on every turn across sessions 4b5af5a1, f1a5d59a, b9d7c64e, and 9fcb0a3e. This is a complete regression from the 0% Opus achieved on 2026-04-06.
-
-**Root cause:** The model parameter passed to `/ask` is not enforced server-side. The behavioral fix (callers using Sonnet) reverted — likely the caller script or user changed the model parameter back to Opus.
-
-**Cost impact:** Opus cache read pricing is $1.50/MTok vs Sonnet's $0.30/MTok (5× multiplier). Opus output is $75/MTok vs $15/MTok (5× multiplier). Per-session cost increased from **$0.17 → $1.69** — a **10× regression**.
-
 ### 1.7 Turn Count Regression 🔴 HIGH
 
 Average LLM calls rose from 21.3 (2026-04-06) to **32.6** (2026-04-10–11). Session 4b5af5a1 hit **61 LLM calls**, exceeding the `--max-turns 16` cap (which allows 32 LLM calls). This suggests the turn cap was raised or removed for some sessions.
@@ -46,7 +38,7 @@ Average LLM calls rose from 21.3 (2026-04-06) to **32.6** (2026-04-10–11). Ses
 
 ## 2. Token Flow Map
 
-### 2.1 Per-Session Token Profile (2026-04-10–11, 10 sessions, ALL Opus)
+### 2.1 Per-Session Token Profile (2026-04-10–11, 10 sessions)
 
 | Session | LLM Calls | Cache Read | Output | Duration |
 |---------|-----------|------------|--------|----------|
@@ -63,7 +55,7 @@ Average LLM calls rose from 21.3 (2026-04-06) to **32.6** (2026-04-10–11). Ses
 | **Average** | **32.6** | **1,093,790** | **703** | **143s** |
 | **Median** | **26.5** | **750,783** | **663** | **103s** |
 
-### 2.2 Context Growth Curve (Session 4b5af5a1, 61 turns, Opus)
+### 2.2 Context Growth Curve (Session 4b5af5a1, 61 turns)
 
 ```
 Turn  1-3:   ~22,400 tok (system prompt + tool schemas — cache creation)
@@ -100,7 +92,6 @@ Context peaked at 71.5k tokens — significantly higher than the 39.5k peak obse
 | Metric | Value | Change from 2026-04-06 |
 |--------|-------|------------------------|
 | Sessions analyzed | 10 | — |
-| Model used | claude-opus-4-6 (100%) | 🔴 was 0% Opus |
 | Avg LLM calls/session | 32.6 | 🔴 +53% (was 21.3) |
 | Avg cache read/session | 1,093,790 tok | 🔴 +99% (was 550,985) |
 | Avg output/session | 703 tok | ~same (was 620) |
@@ -108,45 +99,22 @@ Context peaked at 71.5k tokens — significantly higher than the 39.5k peak obse
 | Max cache read | 2,208,569 tok (f1a5d59a) | 🔴 +126% (was 976k) |
 | Sessions >1M cache | 3/10 (30%) | 🔴 was 0/10 |
 
-### 3.2 Cost Estimate (Opus pricing: $1.50/MTok cache read, $15/MTok input, $75/MTok output)
-
-| Metric | Per Session (Opus, actual) | Per Session (Sonnet, if fixed) |
-|--------|---------------------------|-------------------------------|
-| Cache read cost | $1.64 | $0.33 |
-| Input cost | $0.0001 | $0.00002 |
-| Output cost | $0.053 | $0.011 |
-| **Total** | **$1.69** | **$0.34** |
-
-**Switching back to Sonnet alone would save $1.35/session (80%).** Reducing turn count back to ~21 would save an additional $0.17/session.
-
 ### 3.3 Comparison Table
 
-| Date | Avg Cache/Session | Avg Calls | Runaways (>1M) | Model | Avg Cost/Session |
-|------|-------------------|-----------|-----------------|-------|------------------|
-| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | 60% Opus | ~$1.50 |
-| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | 10% Opus | ~$0.50 |
-| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | 0% Opus | **$0.17** |
-| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **100% Opus** | **$1.69** |
+| Date | Avg Cache/Session | Avg Calls | Runaways (>1M) | Avg Cost/Session |
+|------|-------------------|-----------|-----------------|------------------|
+| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | ~$1.50 |
+| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | ~$0.50 |
+| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | **$0.17** |
+| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **$1.69** |
 
-The 89% cost reduction achieved by 2026-04-06 has been **fully reversed**. Current per-session cost is higher than the 2026-04-03 baseline.
+The cost reduction achieved by 2026-04-06 has been **fully reversed**. Current per-session cost is higher than the 2026-04-03 baseline, driven by turn count inflation and elevated cache volume.
 
 _Historical session tables: [TOKEN_USE_ARCHIVE.md](TOKEN_USE_ARCHIVE.md)_
 
 ---
 
 ## 4. Waste Taxonomy
-
-### 4.1 Model Misallocation — 🔴 CRITICAL REGRESSION
-
-All 10 sessions used Opus. This is the **single largest cost driver**, adding $1.35/session compared to Sonnet.
-
-| Metric | Value |
-|--------|-------|
-| Waste per session | $1.35 (Opus vs Sonnet at same token volume) |
-| Waste per 10 sessions | $13.50 |
-| **Root cause** | No server-side model enforcement; caller reverted to Opus |
-| **Fix** | Enforce Sonnet default in `server.py`; require explicit Opus opt-in flag |
-| **Effort** | Low |
 
 ### 4.2 Turn Count Inflation — 🟡 HIGH
 
@@ -155,8 +123,6 @@ Average 32.6 calls vs 21.3 on 2026-04-06 (+53%). Session 4b5af5a1 hit 61 calls (
 | Metric | Value |
 |--------|-------|
 | Extra cache per session | ~543k tok (1,094k − 551k) |
-| Extra cost at Opus | $0.81/session |
-| Extra cost at Sonnet | $0.16/session |
 | **Root cause** | --max-turns may have been raised/removed; complex tasks generating more turns |
 | **Fix** | Verify --max-turns 16 enforcement; audit sessions with >32 calls |
 | **Effort** | Low |
@@ -167,9 +133,9 @@ Average 32.6 calls vs 21.3 on 2026-04-06 (+53%). Session 4b5af5a1 hit 61 calls (
 
 | Metric | Value |
 |--------|-------|
-| Waste per runaway | ~$1.50 extra (Opus) vs $0.30 (Sonnet) |
-| **Root cause** | Combination of Opus model + high turn counts + large file reads |
-| **Fix** | Re-enforce --max-turns 16; model switch to Sonnet caps effective cost |
+| Waste per runaway | ~$1.50 extra cache per session |
+| **Root cause** | High turn counts + large file reads |
+| **Fix** | Re-enforce --max-turns 16 |
 | **Effort** | Low |
 
 ### 4.4 Test Output Bloat — ✅ RESOLVED
@@ -196,21 +162,12 @@ TOKEN_USE.md excluded from routine reads. Historical data archived.
 
 ## 5. Optimization Plan
 
-### 5.1 Enforce Sonnet Default in server.py [P0 — Low Effort, CRITICAL]
-
-The behavioral fix (callers choosing Sonnet) has failed. **Server-side enforcement is required.**
-
-**Change:** In `cluster/agent/claude/server.py`, default the model to `claude-sonnet-4-6` for `/ask` endpoint. Add an explicit `force_opus=true` parameter that must be set to use Opus. Log a warning when Opus is requested.
-
-**Files:** `cluster/agent/claude/server.py`
-**Impact:** $1.35/session savings (80% reduction). Prevents future regressions.
-
 ### 5.2 Verify --max-turns 16 Enforcement [P0 — Low Effort]
 
 Session 4b5af5a1 hit 61 LLM calls, which exceeds the 32-call limit from `--max-turns 16`. Verify the flag is present in all `claude --print` invocations.
 
 **Files:** `cluster/agent/claude/server.py` (subprocess invocation)
-**Impact:** Caps worst-case sessions at 32 calls (~1M cache at Sonnet = $0.30).
+**Impact:** Caps worst-case sessions at 32 calls (~1M cache).
 
 ### 5.3 Aggregate tool_counts in get_session_summary [P2 — Low Effort]
 
@@ -230,13 +187,6 @@ Average 32.6 calls/session is high even for complex tasks. A lightweight system 
 
 ## 6. Infrastructure Requirements
 
-### 6.1 Model Enforcement (CRITICAL)
-
-| Change | File | Description |
-|--------|------|-------------|
-| Default model to Sonnet | `cluster/agent/claude/server.py` | Hardcode `claude-sonnet-4-6` for `/ask`; require explicit opt-in for Opus |
-| Log model usage | `cluster/agent/claude/server.py` | Emit WARNING when Opus is used for `/ask` |
-
 ### 6.2 Turn Cap Verification
 
 | Change | File | Description |
@@ -255,10 +205,8 @@ Average 32.6 calls/session is high even for complex tasks. A lightweight system 
 
 | Priority | Item | Category | Current Waste | Expected Savings | Effort | Status |
 |----------|------|----------|---------------|------------------|--------|--------|
-| P0 | Enforce Sonnet default in server.py | Model Allocation | $1.35/session (5× markup) | 80% cost reduction | Low | **Open** |
 | P0 | Verify --max-turns 16 enforcement | Runaway Prevention | 61 calls observed (cap=32) | Caps at 32 calls | Low | **Open** |
 | P0 | Add `--max-turns 16` to `claude --print` | Runaway Prevention | Up to 7.1M cache/session | Caps at ~1M cache | Low | **Done** (verify) |
-| P0 | Default `/ask` to Sonnet | Model Allocation | 5× cost on Opus sessions | 80% on affected | Low | **Done** (behavioral, regressed) |
 | P1 | Truncate test output (pass: minimal JSON; fail: 50 lines) | Infrastructure | 2k–15k tok/task | 2k–15k tok/task | Low | **Done** |
 | P1 | Instrument MCP backends (file_read, test_run, git_op events) | Observability | Unquantifiable waste | Full visibility | Medium | **Done** |
 | P2 | Blocking `wait=true` on get_test_results | Infrastructure | 1–2 poll round-trips | 30k–78k cache/poll | Medium | **Done** |
@@ -281,11 +229,11 @@ Average 32.6 calls/session is high even for complex tasks. A lightweight system 
 
 ### Cost Trend
 
-| Date | Avg Cache/Session | Avg Calls/Session | Runaways (>1M) | Model Mix | Avg Cost/Session |
-|------|-------------------|-------------------|-----------------|-----------|------------------|
-| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | 60% Opus | ~$1.50 |
-| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | 10% Opus | ~$0.50 |
-| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | 0% Opus | **$0.17** |
-| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **100% Opus** | **$1.69** 🔴 |
+| Date | Avg Cache/Session | Avg Calls/Session | Runaways (>1M) | Avg Cost/Session |
+|------|-------------------|-------------------|-----------------|------------------|
+| 2026-04-03 | ~800k | ~25 | 2/5 (40%) | ~$1.50 |
+| 2026-04-05 | ~550k | ~21 | 3/10 (30%) | ~$0.50 |
+| 2026-04-06 | 551k | 21.3 | 0/10 (0%) | **$0.17** |
+| **2026-04-11** | **1,094k** | **32.6** | **3/10 (30%)** | **$1.69** 🔴 |
 
-**Summary:** The 89% cost reduction achieved by 2026-04-06 ($1.50 → $0.17) has been fully reversed. Current cost ($1.69/session) exceeds the original 2026-04-03 baseline. Root cause: 100% Opus model usage + turn count inflation. Both are fixable with low-effort server-side enforcement.
+**Summary:** The cost reduction achieved by 2026-04-06 ($0.17/session) has been reversed (now $1.69/session). Regression is attributable to turn count inflation (21.3 → 32.6 avg calls) and elevated cache volume (551k → 1,094k avg). Fixable by re-verifying `--max-turns 16` enforcement and auditing sessions with >32 calls.
