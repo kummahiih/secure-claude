@@ -162,12 +162,14 @@ TOKEN_USE.md excluded from routine reads. Historical data archived.
 
 ## 5. Optimization Plan
 
-### 5.2 Verify --max-turns 16 Enforcement [P0 — Low Effort]
+### 5.2 Verify --max-turns 16 Enforcement [P0 — Low Effort] ✅ DONE (2026-04-19)
 
-Session 4b5af5a1 hit 61 LLM calls, which exceeds the 32-call limit from `--max-turns 16`. Verify the flag is present in all `claude --print` invocations.
+Session 4b5af5a1 hit 61 LLM calls, which exceeds the 32-call limit from `--max-turns 16`. Audit found the flag present in `_run_subagent` (used by `/ask`) but **missing** from the `/plan` endpoint's subprocess invocation, which could explain turn-count inflation for plan-heavy workloads.
 
-**Files:** `cluster/agent/claude/server.py` (subprocess invocation)
-**Impact:** Caps worst-case sessions at 32 calls (~1M cache).
+**Resolution:** Added `--max-turns 16` to the `/plan` endpoint's `subprocess.run` argv. Added three regression tests in `cluster/agent/claude/claude_tests.py` that assert `--max-turns 16` appears (and precedes the `--` query terminator) in every claude invocation from `/ask` (ad-hoc branch), `/ask` (plan-loop branch, every iteration), and `/plan`.
+
+**Files:** `cluster/agent/claude/server.py`, `cluster/agent/claude/claude_tests.py`
+**Impact:** Caps worst-case sessions at 32 LLM calls (~1M cache). Regression guard prevents future removal.
 
 ### 5.3 Aggregate tool_counts in get_session_summary [P2 — Low Effort]
 
@@ -205,7 +207,7 @@ Average 32.6 calls/session is high even for complex tasks. A lightweight system 
 
 | Priority | Item | Category | Current Waste | Expected Savings | Effort | Status |
 |----------|------|----------|---------------|------------------|--------|--------|
-| P0 | Verify --max-turns 16 enforcement | Runaway Prevention | 61 calls observed (cap=32) | Caps at 32 calls | Low | **Open** |
+| P0 | Verify --max-turns 16 enforcement | Runaway Prevention | 61 calls observed (cap=32) | Caps at 32 calls | Low | **Done** (2026-04-19: added `--max-turns 16` to `/plan` subprocess in `cluster/agent/claude/server.py`; regression tests `test_ask_adhoc_enforces_max_turns_16`, `test_ask_plan_loop_enforces_max_turns_16`, `test_plan_endpoint_enforces_max_turns_16` guard all three invocation sites) |
 | P0 | Add `--max-turns 16` to `claude --print` | Runaway Prevention | Up to 7.1M cache/session | Caps at ~1M cache | Low | **Done** (verify) |
 | P1 | Truncate test output (pass: minimal JSON; fail: 50 lines) | Infrastructure | 2k–15k tok/task | 2k–15k tok/task | Low | **Done** |
 | P1 | Instrument MCP backends (file_read, test_run, git_op events) | Observability | Unquantifiable waste | Full visibility | Medium | **Done** |
