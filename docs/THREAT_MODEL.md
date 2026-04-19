@@ -339,7 +339,7 @@ Can read `.secrets.env`, Docker volumes, container logs, `.env`, `.cluster_token
 - `_redact_secrets()` redacts known token values with `[REDACTED]` in both claude-server and codex-server.
 
 ### Model Allowlists
-- claude-server: `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-haiku-4-5-20251001`
+- claude-server: `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-haiku-4-5-20251001`
 - codex-server: `gpt-4o`, `gpt-5.3-codex`, `o3`
 - Both validate `request.model` before subprocess invocation.
 
