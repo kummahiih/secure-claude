@@ -28,8 +28,8 @@ Only `caddy-sidecar` is on both `ext_net` (external) and `int_net`. All other se
 
 | Endpoint | Script | System Prompt | Purpose |
 |:---|:---|:---|:---|
-| `POST /ask` | `query.sh` | `ask.md` (plan-driven) or `ask-adhoc.md` (ad-hoc) | Execute code changes |
-| `POST /plan` | `plan.sh` | `plan.md` | Create plans only, no code execution |
+| `POST /ask` | `query.sh` (Bash wrapper over `cluster/client/cmd/ask`) | `ask.md` (plan-driven) or `ask-adhoc.md` (ad-hoc) | Execute code changes |
+| `POST /plan` | `plan.sh` (Bash wrapper over `cluster/client/cmd/plan`) | `plan.md` | Create plans only, no code execution |
 
 ---
 
@@ -166,6 +166,9 @@ secure-claude/
 │   │   └── prompts/        # system/ (ask.md, plan.md) + commands/
 │   ├── planner/            # Planner submodule
 │   ├── tester/             # Tester server submodule (Go)
+│   ├── client/             # Go client module (own go.mod + test.sh)
+│   │   ├── cmd/ask/        # Go binary called by query.sh (POST /ask)
+│   │   └── cmd/plan/       # Go binary called by plan.sh (POST /plan)
 │   ├── Dockerfile.claude   # claude-server image
 │   ├── Dockerfile.codex    # codex-server image
 │   ├── Dockerfile.caddy    # caddy-sidecar image
@@ -178,7 +181,7 @@ secure-claude/
 ├── plans/                  # JSON plan files
 ├── logs/                   # JSONL session logs
 ├── run.sh                  # Cluster startup + cert generation
-├── query.sh                # POST /ask client
-├── plan.sh                 # POST /plan client
+├── query.sh                # Bash wrapper → cluster/client/cmd/ask (POST /ask)
+├── plan.sh                 # Bash wrapper → cluster/client/cmd/plan (POST /plan)
 └── test.sh                 # Parent-repo test runner
 ```

@@ -79,6 +79,8 @@ Host / Network
 | POST /ask | query.sh | ask.md (plan-driven) or ask-adhoc.md (ad-hoc) | Execute code changes; server pre-checks plan-server and uses the plan-driven loop when a task is active, or a single ad-hoc invocation when no plan exists |
 | POST /plan | plan.sh | PLAN_SYSTEM_PROMPT (cluster/agent/prompts/system/plan.md) | Create plans only, no code execution |
 
+- `query.sh` and `plan.sh` are thin Bash wrappers that `exec` the Go binaries at `cluster/client/cmd/ask` and `cluster/client/cmd/plan` respectively. The `cluster/client/` module has its own `go.mod` and `test.sh`, and is wired into the root `test.sh` via `(cd cluster/client && bash ./test.sh)`.
+
 `cluster/agent/prompts/system/` supplies all system prompts (`ask.md`, `ask-adhoc.md`, `plan.md`); `cluster/agent/prompts/commands/` supplies Claude Code slash commands. Both are baked into the claude-server image at build time (`COPY agent/prompts/system/ /app/prompts/` and `COPY agent/prompts/commands/ /home/appuser/.claude/commands/`) — no runtime bind-mount is required. `runenv.py` reads these prompts from `/app/prompts/` on startup.
 
 ### Request flow (/ask):
