@@ -24,11 +24,9 @@ Subagent-per-task (`claude --print` per task) confirmed across all 45 sessions a
 
 Shortened in commit f205653. ~500 tokens of redundancy removed.
 
-### 1.5 File Read Discipline ⚠️ PARTIAL
+### 1.5 File Read Discipline ✅ RESOLVED (2026-04-19)
 
-`tool_counts` remains `{}` in all 10 new sessions — MCP backend tool counting not yet wired into summary aggregation. No duplicate file reads detected in sessions 4b5af5a1 or f1a5d59a (dedup endpoint works).
-
-**Context debt:** Unquantifiable until tool_counts aggregation is implemented. Estimated engineering effort: Low.
+Tool-event aggregation is now wired into `get_session_summary` (see §5.3). `tool_counts` rolls up `file_read`, `file_write`, `test_run`, `git_op`, and `plan_op` events, with per-operation breakdown for `git_op` and `plan_op`. No duplicate file reads detected in sessions 4b5af5a1 or f1a5d59a (dedup endpoint works).
 
 ### 1.7 Turn Count Regression 🔴 HIGH
 
@@ -146,9 +144,9 @@ Pass returns `{"status":"pass","exit_code":0}`; fail returns last 50 lines.
 
 Blocking `wait=true` on `get_test_results`. Zero poll round-trips observed.
 
-### 4.6 Tool Count Aggregation Gap — ⚠️ LOW PRIORITY
+### 4.6 Tool Count Aggregation Gap — ✅ RESOLVED (2026-04-19)
 
-`tool_counts` is `{}` in all sessions. Individual events emitted but not aggregated.
+`handleGetSummary` aggregates `file_read`/`file_write`/`test_run`/`git_op`/`plan_op` events into `tool_counts`, with per-operation keys for `git_op` and `plan_op` (e.g., `git_op:git_commit`).
 
 ### 4.7 Context Accumulation — ✅ RESOLVED
 
@@ -171,11 +169,13 @@ Session 4b5af5a1 hit 61 LLM calls, which exceeds the 32-call limit from `--max-t
 **Files:** `cluster/agent/claude/server.py`, `cluster/agent/claude/claude_tests.py`
 **Impact:** Caps worst-case sessions at 32 LLM calls (~1M cache). Regression guard prevents future removal.
 
-### 5.3 Aggregate tool_counts in get_session_summary [P2 — Low Effort]
+### 5.3 Aggregate tool_counts in get_session_summary [P2 — Low Effort] ✅ DONE (2026-04-19)
 
-Roll up `file_read`, `test_run`, `git_op` event counts into `tool_counts` field.
+`handleGetSummary` in `cluster/log-server/main.go` now rolls up `file_read`, `file_write`, `test_run`, `git_op`, and `plan_op` events into `tool_counts`. `git_op` and `plan_op` events also produce a per-operation breakdown key (`git_op:git_commit`, `plan_op:plan_complete`, etc.) so callers can attribute waste to specific operations without re-reading the raw event log.
 
-**Files:** `cluster/log-server/main.go`
+**Resolution:** Extended the `switch e.EventType` aggregation in `handleGetSummary`. Added regression tests `TestSummaryGitOpPerOperationBreakdown`, `TestSummaryFileWriteCount`, `TestSummaryPlanOpCount` in `cluster/log-server/main_test.go`. Existing tests `TestSummaryFileReadCount`, `TestSummaryTestRunCount`, `TestSummaryGitOpCount`, `TestSummaryMixedEventTypes` continue to pass.
+
+**Files:** `cluster/log-server/main.go`, `cluster/log-server/main_test.go`
 **Impact:** Enables per-tool waste measurement. No direct token savings.
 
 ### 5.4 Fast-path Prompt for Trivial Tasks [P3 — Medium Effort]
@@ -214,7 +214,7 @@ Average 32.6 calls/session is high even for complex tasks. A lightweight system 
 | P2 | Blocking `wait=true` on get_test_results | Infrastructure | 1–2 poll round-trips | 30k–78k cache/poll | Medium | **Done** |
 | P2 | Split ARCHITECTURE.md → overview + detail | Documentation | 7k–9k tok/routine task | 7k–9k tok/task | Low | **Done** |
 | P2 | Archive TOKEN_USE history; exclude from routine reads | Context Hygiene | 11k tok on non-analysis | 11k tok/read | Low | **Done** |
-| P2 | Aggregate tool_counts in get_session_summary | Observability | Visibility gap | Enables per-tool analysis | Low | Open |
+| P2 | Aggregate tool_counts in get_session_summary | Observability | Visibility gap | Enables per-tool analysis | Low | **Done** (2026-04-19: `handleGetSummary` rolls up `file_read`/`file_write`/`test_run`/`git_op`/`plan_op` events with per-operation breakdown for `git_op`/`plan_op`; regression tests `TestSummaryGitOpPerOperationBreakdown`, `TestSummaryFileWriteCount`, `TestSummaryPlanOpCount` in `cluster/log-server/main_test.go`) |
 | P3 | Pre-spawn plan check (skip if no pending task) | Infrastructure | 22k tok/DONE-call | 22k tok/no-op | Low | **Done** |
 | P3 | Per-turn LLM event logging | Observability | Turn-level blind spot | Full turn visibility | Medium | **Done** |
 | P3 | Fast-path prompt for trivial tasks | Turn Reduction | ~10 extra turns on simple tasks | ~50% cache on simple tasks | Medium | Open |

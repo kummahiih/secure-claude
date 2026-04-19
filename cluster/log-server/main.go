@@ -314,10 +314,20 @@ func handleGetSummary(token, logsDir string) http.HandlerFunc {
 				}
 			case "file_read":
 				summary.ToolCounts["file_read"]++
+			case "file_write":
+				summary.ToolCounts["file_write"]++
 			case "test_run":
 				summary.ToolCounts["test_run"]++
 			case "git_op":
 				summary.ToolCounts["git_op"]++
+				if e.Operation != "" {
+					summary.ToolCounts["git_op:"+e.Operation]++
+				}
+			case "plan_op":
+				summary.ToolCounts["plan_op"]++
+				if e.Operation != "" {
+					summary.ToolCounts["plan_op:"+e.Operation]++
+				}
 			}
 		}
 

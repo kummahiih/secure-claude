@@ -104,6 +104,78 @@ func TestSummaryGitOpCount(t *testing.T) {
 	}
 }
 
+func TestSummaryGitOpPerOperationBreakdown(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "s3b", "event_type": "git_op", "operation": "git_commit",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "s3b", "event_type": "git_op", "operation": "git_commit",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "s3b", "event_type": "git_op", "operation": "git_status",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "s3b", "event_type": "git_op", // missing operation
+	})
+
+	sum := getSummary(t, srv, "s3b")
+	if sum.ToolCounts["git_op"] != 4 {
+		t.Errorf("expected git_op=4, got %d", sum.ToolCounts["git_op"])
+	}
+	if sum.ToolCounts["git_op:git_commit"] != 2 {
+		t.Errorf("expected git_op:git_commit=2, got %d", sum.ToolCounts["git_op:git_commit"])
+	}
+	if sum.ToolCounts["git_op:git_status"] != 1 {
+		t.Errorf("expected git_op:git_status=1, got %d", sum.ToolCounts["git_op:git_status"])
+	}
+	if _, present := sum.ToolCounts["git_op:"]; present {
+		t.Errorf("expected no empty-operation key, got entry for 'git_op:'")
+	}
+}
+
+func TestSummaryFileWriteCount(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "sfw", "event_type": "file_write", "path": "x.py",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "sfw", "event_type": "file_write", "path": "y.py",
+	})
+
+	sum := getSummary(t, srv, "sfw")
+	if sum.ToolCounts["file_write"] != 2 {
+		t.Errorf("expected file_write=2, got %d", sum.ToolCounts["file_write"])
+	}
+}
+
+func TestSummaryPlanOpCount(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "spo", "event_type": "plan_op", "operation": "plan_complete", "task_id": "t1",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "spo", "event_type": "plan_op", "operation": "plan_complete", "task_id": "t2",
+	})
+	doIngest(t, srv, map[string]interface{}{
+		"session_id": "spo", "event_type": "plan_op", "operation": "plan_block", "task_id": "t3",
+	})
+
+	sum := getSummary(t, srv, "spo")
+	if sum.ToolCounts["plan_op"] != 3 {
+		t.Errorf("expected plan_op=3, got %d", sum.ToolCounts["plan_op"])
+	}
+	if sum.ToolCounts["plan_op:plan_complete"] != 2 {
+		t.Errorf("expected plan_op:plan_complete=2, got %d", sum.ToolCounts["plan_op:plan_complete"])
+	}
+	if sum.ToolCounts["plan_op:plan_block"] != 1 {
+		t.Errorf("expected plan_op:plan_block=1, got %d", sum.ToolCounts["plan_op:plan_block"])
+	}
+}
+
 func TestSummaryMixedEventTypes(t *testing.T) {
 	srv, _ := newTestServer(t)
 
