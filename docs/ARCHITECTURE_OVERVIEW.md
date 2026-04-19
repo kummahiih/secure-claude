@@ -86,6 +86,7 @@ The agent **never** holds `ANTHROPIC_API_KEY`.
 | LLM gateway | LiteLLM (`ghcr.io/berriai/litellm:main-v1.82.3-stable.patch.2`) |
 | API servers | Python / FastAPI (`claude-server`, `codex-server`, `plan-server`) |
 | File/Git/Test/Log servers | Go (`mcp-server`, `git-server`, `tester-server`, `log-server`) |
+| Client CLI | Go (`cluster/client/cmd/ask`, `cluster/client/cmd/plan`) |
 | Reverse proxy / TLS | Caddy 2 (internal CA, TLS 1.3 minimum) |
 | MCP transport | stdio wrappers → HTTPS REST; `mcp-watchdog` intercepts all JSON-RPC |
 | Plan format | JSON (stored in `plans/` directory) |

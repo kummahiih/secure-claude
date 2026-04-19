@@ -157,6 +157,7 @@ Every container validates security invariants before serving. The shared `isolat
 | Proxy network access | `int_net` only, egress via caddy-sidecar | Direct internet from proxy | Prevents API key exfiltration; all outbound funnelled through caddy-sidecar |
 | Architecture doc format | Split overview + detail | Single combined file | Token efficiency: routine tasks need only overview (~3k tok vs ~10k tok combined) |
 | Isolation checks | Shared `isolation/verify_isolation.py` | Per-server duplicated checks | Single source of truth; reused by both claude-server and codex-server |
+| Client CLI | Go binaries at `cluster/client/cmd/{ask,plan}` | Pure Bash scripts | Typed request/response, easier testing, shared HTTP client library |
 
 ### Open Residual Risks
 
