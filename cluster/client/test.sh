@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[unit] Running Go client tests..."
+CGO_ENABLED=0 GOMAXPROCS=1 go vet ./...
+CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 -v -timeout 60s ./...
