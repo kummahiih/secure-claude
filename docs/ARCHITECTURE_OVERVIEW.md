@@ -90,7 +90,7 @@ The agent **never** holds `ANTHROPIC_API_KEY`.
 | MCP transport | stdio wrappers → HTTPS REST; `mcp-watchdog` intercepts all JSON-RPC |
 | Plan format | JSON (stored in `plans/` directory) |
 | Container runtime | Docker / Docker Compose (9 containers) |
-| Test tooling (tester image) | Python 3.12, pytest 8.3.4, Go 1.26.1 |
+| Test tooling (tester image) | Python 3.12, pytest 9.0.3, Go 1.26.1 |
 | Security scanning | govulncheck, pip-audit, hadolint, trivy (`test-integration.sh`) |
 
 ---
