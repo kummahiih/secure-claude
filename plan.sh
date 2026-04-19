@@ -14,4 +14,4 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-exec go run ./cluster/client/cmd/plan "$@"
+exec ./cluster/client/cmd/plan/plan "$@"
