@@ -22,7 +22,7 @@ RUN go build -o tester-server main.go
 
 # Stage 2: Certificate Signer
 FROM alpine:3.23.3 AS signer
-RUN apk add --no-cache openssl=3.5.5-r0
+RUN apk add --no-cache openssl=3.5.6-r0
 WORKDIR /certs
 
 RUN --mount=type=bind,src=./certs/ca.key,target=/tmp/ca.key \

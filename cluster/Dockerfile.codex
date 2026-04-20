@@ -1,6 +1,6 @@
 FROM alpine:3.23.3 AS signer
 # Pinning openssl version for reproducibility
-RUN apk add --no-cache openssl=3.5.5-r0
+RUN apk add --no-cache openssl=3.5.6-r0
 WORKDIR /certs
 
 # Securely mount the CA key from the host to sign the agent's unique cert
