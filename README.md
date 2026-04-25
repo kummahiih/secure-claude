@@ -2,13 +2,19 @@
 
 > A hardened, containerized environment for running Claude Code as an AI agent with access to local tools via the Model Context Protocol (MCP). 
 
-Giving an AI raw access to your host machine is risky. **Secure Claude** solves this by wrapping Anthropic's Claude Code CLI in a heavily audited, zero-trust infrastructure. Credentials are never exposed to the agent — a LiteLLM sidecar proxy holds the real API keys while the agent uses ephemeral tokens.
+## Why `secure-claude`?
 
-The system forces a deliberate **plan-then-execute** workflow. You create a structured plan with `plan.sh`, and the agent executes tasks one at a time with `query.sh`. This planning structure is inspired by [get-shit-done](https://github.com/gsd-build/get-shit-done).
+AI coding agents are highly privileged targets. Recent real-world attacks prove that you cannot rely on an AI to "behave safely." `secure-claude` relies on hard architectural boundaries instead.
+
+* **Stopping the Git Hook Worms (MCP Sandboxing):** In early 2026, malware worms specifically targeted AI tool configs to install persistent, malicious Git hooks. We use strictly managed MCP services to sandbox file-system access, physically preventing the AI from modifying hidden `.git` directories or installing these hooks.
+* **Stopping Infostealers & Agentic XSS (Caddy Egress Filtering):** Attackers use hidden prompt injections to trick agents into leaking data, and supply chain attacks (like the massive **LiteLLM infostealer** in March 2026) silently sweep environments for secrets to send to attacker-controlled servers. Caddy acts as a strict egress firewall for the agent **and** LiteLLM. Even if the proxy is poisoned or the agent is hijacked, unauthorized outbound network requests are completely blocked.
+
+## Token usage optimization
+As this is a study project i have tried several token usage optimizations. One of such is **plan-then-execute** workflow. You create a structured plan with `plan.sh`, and the agent executes tasks one at a time with `query.sh`. This planning structure is inspired by [get-shit-done](https://github.com/gsd-build/get-shit-done).
 
 ---
 
-## Why use this? (Security Guarantees)
+## Security Guarantees
 
 The cluster-level guarantees are designed for maximum defense-in-depth:
 
