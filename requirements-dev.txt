@@ -7,6 +7,6 @@ pydantic==2.12.5
 pytest==9.0.3
 httpx==0.28.1
 requests==2.33.0
-mcp==1.26.0
+mcp==1.27.2
 pytest-asyncio==1.3.0
 mcp-watchdog==0.1.9
