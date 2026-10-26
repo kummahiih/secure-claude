@@ -1,6 +1,6 @@
 # Local dev/test venv dependencies.
 # These packages are installed by init_build.sh into the local virtualenv.
-certifi==2026.2.25
+certifi==2026.10.19
 fastapi==0.135.1
 uvicorn==0.42.0
 pydantic==2.12.5
